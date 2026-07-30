@@ -47,6 +47,7 @@
 
 	export let showUserProfile = true;
 	export let thread = false;
+	export let unreadMention = false;
 
 	export let replyToMessage = false;
 	export let disabled = false;
@@ -617,6 +618,12 @@
 
 						{#if !thread && message.reply_count > 0}
 							<div class="flex items-center gap-1.5 -mt-0.5 mb-1.5">
+								{#if unreadMention}
+									<span class="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-600 dark:text-sky-300">
+										<span class="font-bold">@</span>
+										{$i18n.t('You were mentioned')}
+									</span>
+								{/if}
 								<button
 									class="flex items-center text-xs py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition"
 									on:click={() => {

@@ -648,6 +648,66 @@ class ChannelTable:
             await db.commit()
             return True
 
+    async def add_unread_mention(
+        self, channel_id: str, user_id: str, message_id: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        """Record a mention for a channel member without changing channel unread state."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChannelMember).filter(
+                    ChannelMember.channel_id == channel_id,
+                    ChannelMember.user_id == user_id,
+                )
+            )
+            member = result.scalars().first()
+            if not member:
+                return False
+
+            data = dict(member.data or {})
+            mention_ids = list(data.get('unread_mention_message_ids') or [])
+            if message_id not in mention_ids:
+                mention_ids.append(message_id)
+            data['unread_mention_message_ids'] = mention_ids[-500:]
+            member.data = data
+            member.updated_at = int(time.time_ns())
+            await db.commit()
+            return True
+
+    async def get_unread_mention_ids(
+        self, channel_id: str, user_id: str, db: Optional[AsyncSession] = None
+    ) -> list[str]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChannelMember.data).filter(
+                    ChannelMember.channel_id == channel_id,
+                    ChannelMember.user_id == user_id,
+                )
+            )
+            data = result.scalar_one_or_none() or {}
+            return list(data.get('unread_mention_message_ids') or [])
+
+    async def clear_unread_mention(
+        self, channel_id: str, user_id: str, message_id: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChannelMember).filter(
+                    ChannelMember.channel_id == channel_id,
+                    ChannelMember.user_id == user_id,
+                )
+            )
+            member = result.scalars().first()
+            if not member:
+                return False
+
+            data = dict(member.data or {})
+            mention_ids = [mid for mid in (data.get('unread_mention_message_ids') or []) if mid != message_id]
+            data['unread_mention_message_ids'] = mention_ids
+            member.data = data
+            member.updated_at = int(time.time_ns())
+            await db.commit()
+            return True
+
     async def update_member_active_status(
         self,
         channel_id: str,

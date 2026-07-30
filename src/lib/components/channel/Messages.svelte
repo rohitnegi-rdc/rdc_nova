@@ -33,6 +33,7 @@
 	export let replyToMessage = null;
 	export let top = false;
 	export let thread = false;
+	export let unreadMentionIds = [];
 
 	export let onLoad: Function = () => {};
 	export let onReply: Function = () => {};
@@ -126,6 +127,7 @@
 		{#each messageList as message, messageIdx (id ? `${id}-${message.id}` : message.id)}
 			<Message
 				{message}
+				unreadMention={unreadMentionIds.includes(message.id)}
 				{channel}
 				{thread}
 				replyToMessage={replyToMessage?.id === message.id}

@@ -30,6 +30,7 @@
 		appInfo,
 		toolServers,
 		playingNotificationSound,
+		unreadChannelMentions,
 		channels,
 		channelId,
 		terminalServers,
@@ -659,6 +660,34 @@
 
 	const channelEventHandler = async (event) => {
 		console.log('channelEventHandler', event);
+		if (event?.data?.type === 'mention') {
+			const message = event.data.data;
+			unreadChannelMentions.update((current) => ({
+				...current,
+				[event.channel_id]: [
+					...new Set([...(current[event.channel_id] ?? []), event.mention_id ?? event.message_id])
+				]
+			}));
+
+			const title = `${event?.user?.name ?? 'Someone'} mentioned you in #${event?.channel?.name ?? 'channel'}`;
+			const content = message?.content ?? '';
+			if ($isLastActiveTab && ($settings?.notificationEnabled ?? false)) {
+				new Notification(`${title} • Open WebUI`, {
+					body: content,
+					icon: `${WEBUI_API_BASE_URL}/users/${event?.user?.id}/profile/image`
+				});
+			}
+			toast.custom(NotificationToast, {
+				componentProps: {
+					onClick: () => goto(`/channels/${event.channel_id}`),
+					content,
+					title
+				},
+				duration: 15000,
+				unstyled: true
+			});
+			return;
+		}
 		if (event.data?.type === 'typing') {
 			return;
 		}

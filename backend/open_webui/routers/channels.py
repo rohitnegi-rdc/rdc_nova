@@ -1063,6 +1063,36 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
                 to=f'channel:{channel.id}',
             )
 
+            # Mentions are private notifications. Keep them separate from the
+            # existing channel event so ordinary channel behavior is unchanged.
+            user_mentions = {
+                mention['id'] for mention in extract_mentions(message.content) if mention['id_type'] == 'U'
+            }
+            if user_mentions:
+                members = await Channels.get_members_by_channel_id(channel.id, db=db)
+                mention_anchor_id = message.parent_id or message.id
+                recipient_ids = [
+                    member.user_id
+                    for member in members
+                    if member.user_id in user_mentions and member.user_id != user.id
+                ]
+                for recipient_id in recipient_ids:
+                    await Channels.add_unread_mention(channel.id, recipient_id, mention_anchor_id, db=db)
+                if recipient_ids:
+                    await emit_to_users(
+                        'events:mention',
+                        {
+                            'channel_id': channel.id,
+                            'message_id': message.id,
+                            'mention_id': mention_anchor_id,
+                            'parent_id': message.parent_id,
+                            'data': {'type': 'mention', 'data': message.model_dump()},
+                            'user': UserNameResponse(**user.model_dump()).model_dump(),
+                            'channel': channel.model_dump(),
+                        },
+                        recipient_ids,
+                    )
+
             if message.parent_id:
                 # If this message is a reply, emit to the parent message as well
                 parent_message = await Messages.get_message_by_id(message.parent_id, db=db)
@@ -1088,6 +1118,33 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
     except Exception as e:
         log.exception(e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT())
+
+
+@router.get('/{id}/mentions/unread', response_model=list[str])
+async def get_unread_channel_mentions(
+    request: Request,
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await check_channels_access(request, user)
+    if not await Channels.is_user_channel_member(id, user.id, db=db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
+    return await Channels.get_unread_mention_ids(id, user.id, db=db)
+
+
+@router.post('/{id}/mentions/{message_id}/read', response_model=bool)
+async def mark_channel_mention_read(
+    request: Request,
+    id: str,
+    message_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await check_channels_access(request, user)
+    if not await Channels.is_user_channel_member(id, user.id, db=db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
+    return await Channels.clear_unread_mention(id, user.id, message_id, db=db)
 
 
 @router.post('/{id}/messages/post', response_model=Optional[MessageModel])

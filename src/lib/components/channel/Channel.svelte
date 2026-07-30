@@ -9,12 +9,19 @@
 	import {
 		chatId,
 		channels,
+		unreadChannelMentions,
 		channelId as _channelId,
 		showSidebar,
 		socket,
 		user
 	} from '$lib/stores';
-	import { getChannelById, getChannelMessages, sendMessage } from '$lib/apis/channels';
+	import {
+		getChannelById,
+		getChannelMessages,
+		getUnreadChannelMentions,
+		markChannelMentionRead,
+		sendMessage
+	} from '$lib/apis/channels';
 
 	import Messages from './Messages.svelte';
 	import MessageInput from './MessageInput.svelte';
@@ -43,6 +50,7 @@
 
 	let typingUsers = [];
 	let typingUsersTimeout = {};
+	let unreadMentionIds = [];
 
 	$: if (id) {
 		initHandler();
@@ -87,6 +95,7 @@
 
 		top = false;
 		messages = null;
+		unreadMentionIds = [];
 		channel = null;
 		threadId = null;
 
@@ -98,6 +107,8 @@
 		});
 
 		if (channel) {
+			unreadMentionIds = await getUnreadChannelMentions(localStorage.token, id).catch(() => []);
+			unreadChannelMentions.update((current) => ({ ...current, [id]: unreadMentionIds }));
 			messages = await getChannelMessages(localStorage.token, id, 0);
 
 			if (messages) {
@@ -334,8 +345,9 @@
 						}}
 					>
 						{#key id}
-							<Messages
-								{channel}
+								<Messages
+									{channel}
+									unreadMentionIds={$unreadChannelMentions[id] ?? unreadMentionIds}
 								{top}
 								{messages}
 								{replyToMessage}
@@ -344,9 +356,16 @@
 									await tick();
 									chatInputElement?.focus();
 								}}
-								onThread={(id) => {
-									threadId = id;
-								}}
+									onThread={(messageId) => {
+										threadId = messageId;
+										if (($unreadChannelMentions[id] ?? []).includes(messageId)) {
+											markChannelMentionRead(localStorage.token, id, messageId).catch(() => {});
+											unreadChannelMentions.update((current) => ({
+												...current,
+												[id]: (current[id] ?? []).filter((unreadId) => unreadId !== messageId)
+											}));
+										}
+									}}
 								onLoad={async () => {
 									const newMessages = await getChannelMessages(
 										localStorage.token,

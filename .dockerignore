@@ -18,3 +18,8 @@ uploads
 **/*.db
 _test
 backend/data/*
+.git
+openwebui-backup-*
+graphify-out
+backend/data/*
+backend/data/**
