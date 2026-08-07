@@ -757,6 +757,34 @@ async def agenerate_openai_batch_embeddings(
                 raise ValueError("Unexpected OpenAI embeddings response: missing 'data' key")
 
 
+async def agenerate_gemini_batch_embeddings(
+    model: str,
+    texts: list[str],
+    key: str = '',
+    output_dimensionality: int = 3072,
+) -> list[list[float]]:
+    """Generate Gemini embeddings directly through the Google GenAI SDK."""
+    if not key:
+        raise ValueError('RAG_GEMINI_API_KEY is required for the Gemini embedding engine')
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise ImportError('The Gemini embedding engine requires the google-genai package') from exc
+
+    client = genai.Client(api_key=key)
+    result = await asyncio.to_thread(
+        client.models.embed_content,
+        model=model,
+        contents=texts,
+        config=types.EmbedContentConfig(output_dimensionality=int(output_dimensionality)),
+    )
+    embeddings = [list(embedding.values) for embedding in result.embeddings]
+    if len(embeddings) != len(texts):
+        raise ValueError(f'Gemini returned {len(embeddings)} embeddings for {len(texts)} inputs')
+    return embeddings
+
+
 def generate_azure_openai_batch_embeddings(
     model: str,
     texts: list[str],
@@ -925,6 +953,7 @@ def get_embedding_function(
     azure_api_version=None,
     enable_async=True,
     concurrent_requests=0,
+    gemini_output_dimensionality=3072,
 ) -> Awaitable:
     if embedding_engine == '':
         if embedding_function is None:
@@ -949,7 +978,7 @@ def get_embedding_function(
             )
 
         return async_embedding_function
-    elif embedding_engine in ['ollama', 'openai', 'azure_openai']:
+    elif embedding_engine in ['ollama', 'openai', 'azure_openai', 'gemini']:
         embedding_function = lambda query, prefix=None, user=None: generate_embeddings(
             engine=embedding_engine,
             model=embedding_model,
@@ -958,6 +987,7 @@ def get_embedding_function(
             url=url,
             key=key,
             user=user,
+            gemini_output_dimensionality=gemini_output_dimensionality,
             azure_api_version=azure_api_version,
         )
 
@@ -1054,6 +1084,16 @@ async def generate_embeddings(
             azure_api_version,
             prefix,
             user,
+        )
+        if embeddings is None:
+            return None
+        return embeddings[0] if isinstance(text, str) else embeddings
+    elif engine == 'gemini':
+        embeddings = await agenerate_gemini_batch_embeddings(
+            model,
+            text if isinstance(text, list) else [text],
+            key,
+            output_dimensionality=kwargs.get('gemini_output_dimensionality', 3072),
         )
         if embeddings is None:
             return None

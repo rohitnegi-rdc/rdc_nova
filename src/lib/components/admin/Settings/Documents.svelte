@@ -55,6 +55,7 @@
 
 	let OllamaUrl = '';
 	let OllamaKey = '';
+	let GeminiKey = '';
 
 	let querySettings = {
 		template: '',
@@ -100,6 +101,10 @@
 			toast.error($i18n.t('OpenAI URL/Key required.'));
 			return;
 		}
+		if (RAG_EMBEDDING_ENGINE === 'gemini' && GeminiKey === '') {
+			toast.error($i18n.t('Gemini API key required.'));
+			return;
+		}
 
 		console.debug('Update embedding model attempt:', {
 			RAG_EMBEDDING_ENGINE,
@@ -128,6 +133,9 @@
 				key: AzureOpenAIKey,
 				url: AzureOpenAIUrl,
 				version: AzureOpenAIVersion
+			},
+			gemini_config: {
+				key: GeminiKey
 			}
 		}).catch(async (error) => {
 			toast.error(`${error}`);
@@ -271,6 +279,7 @@
 			AzureOpenAIKey = embeddingConfig.azure_openai_config.key;
 			AzureOpenAIUrl = embeddingConfig.azure_openai_config.url;
 			AzureOpenAIVersion = embeddingConfig.azure_openai_config.version;
+			GeminiKey = embeddingConfig.gemini_config?.key ?? '';
 		}
 	};
 	onMount(async () => {
@@ -930,8 +939,10 @@
 												RAG_EMBEDDING_MODEL = '';
 											} else if (e.target.value === 'openai') {
 												RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
-											} else if (e.target.value === 'azure_openai') {
-												RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
+							} else if (e.target.value === 'azure_openai') {
+								RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
+							} else if (e.target.value === 'gemini') {
+								RAG_EMBEDDING_MODEL = 'gemini-embedding-2';
 											} else if (e.target.value === '') {
 												RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2';
 											}
@@ -940,7 +951,8 @@
 										<option value="">{$i18n.t('Default (SentenceTransformers)')}</option>
 										<option value="ollama">{$i18n.t('Ollama')}</option>
 										<option value="openai">{$i18n.t('OpenAI')}</option>
-										<option value="azure_openai">{$i18n.t('Azure OpenAI')}</option>
+						<option value="azure_openai">{$i18n.t('Azure OpenAI')}</option>
+						<option value="gemini">{$i18n.t('Google Gemini')}</option>
 									</select>
 								</div>
 							</div>
@@ -994,6 +1006,10 @@
 											required
 										/>
 									</div>
+								</div>
+							{:else if RAG_EMBEDDING_ENGINE === 'gemini'}
+								<div class="my-0.5 flex gap-2 pr-2">
+									<SensitiveInput placeholder={$i18n.t('Gemini API Key')} bind:value={GeminiKey} required />
 								</div>
 							{/if}
 						</div>
@@ -1082,7 +1098,7 @@
 							</div>
 						</div>
 
-						{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai'}
+		{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai' || RAG_EMBEDDING_ENGINE === 'gemini'}
 							<div class="  mb-2.5 flex w-full justify-between">
 								<div class="self-center text-xs font-medium">
 									<Tooltip

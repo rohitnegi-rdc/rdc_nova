@@ -262,6 +262,8 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
         'RAG_EMBEDDING_BATCH_SIZE': request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
         'ENABLE_ASYNC_EMBEDDING': request.app.state.config.ENABLE_ASYNC_EMBEDDING,
         'RAG_EMBEDDING_CONCURRENT_REQUESTS': request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+        'RAG_GEMINI_OUTPUT_DIMENSIONALITY': request.app.state.config.RAG_GEMINI_OUTPUT_DIMENSIONALITY,
+        'gemini_config': {'key': request.app.state.config.RAG_GEMINI_API_KEY},
         'openai_config': {
             'url': request.app.state.config.RAG_OPENAI_API_BASE_URL,
             'key': request.app.state.config.RAG_OPENAI_API_KEY,
@@ -294,10 +296,15 @@ class AzureOpenAIConfigForm(BaseModel):
     version: str
 
 
+class GeminiConfigForm(BaseModel):
+    key: str
+
+
 class EmbeddingModelUpdateForm(BaseModel):
     openai_config: OpenAIConfigForm | None = None
     ollama_config: OllamaConfigForm | None = None
     azure_openai_config: AzureOpenAIConfigForm | None = None
+    gemini_config: GeminiConfigForm | None = None
     RAG_EMBEDDING_ENGINE: str
     RAG_EMBEDDING_MODEL: str
     RAG_EMBEDDING_BATCH_SIZE: int | None = 1
@@ -337,6 +344,7 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             'ollama',
             'openai',
             'azure_openai',
+            'gemini',
         ]:
             if form_data.openai_config is not None:
                 request.app.state.config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url
@@ -350,6 +358,8 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
                 request.app.state.config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url
                 request.app.state.config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key
                 request.app.state.config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version
+            if form_data.gemini_config is not None:
+                request.app.state.config.RAG_GEMINI_API_KEY = form_data.gemini_config.key
 
         request.app.state.ef = get_ef(
             request.app.state.config.RAG_EMBEDDING_ENGINE,
@@ -366,7 +376,7 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
                 else (
                     request.app.state.config.RAG_OLLAMA_BASE_URL
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                    else ''
                 )
             ),
             (
@@ -375,7 +385,11 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
                 else (
                     request.app.state.config.RAG_OLLAMA_API_KEY
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                    else (
+                        request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
+                        else request.app.state.config.RAG_GEMINI_API_KEY
+                    )
                 )
             ),
             request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
@@ -386,6 +400,7 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             ),
             enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
             concurrent_requests=request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+            gemini_output_dimensionality=request.app.state.config.RAG_GEMINI_OUTPUT_DIMENSIONALITY,
         )
 
         return {
@@ -1498,7 +1513,11 @@ def save_docs_to_vector_db(
                 else (
                     request.app.state.config.RAG_OLLAMA_BASE_URL
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                    else (
+                        request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
+                        else ''
+                    )
                 )
             ),
             (
@@ -1507,7 +1526,11 @@ def save_docs_to_vector_db(
                 else (
                     request.app.state.config.RAG_OLLAMA_API_KEY
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                    else (
+                        request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
+                        else request.app.state.config.RAG_GEMINI_API_KEY
+                    )
                 )
             ),
             request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
@@ -1518,6 +1541,7 @@ def save_docs_to_vector_db(
             ),
             enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
             concurrent_requests=request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+            gemini_output_dimensionality=request.app.state.config.RAG_GEMINI_OUTPUT_DIMENSIONALITY,
         )
 
         # Run async embedding in sync context using the main event loop

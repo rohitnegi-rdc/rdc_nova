@@ -1460,6 +1460,17 @@ RAG_OPENAI_API_KEY = ConfigVar(
     os.getenv('RAG_OPENAI_API_KEY', OPENAI_API_KEY),
 )
 
+RAG_GEMINI_API_KEY = ConfigVar(
+    'RAG_GEMINI_API_KEY',
+    'rag.gemini_api_key',
+    os.getenv('RAG_GEMINI_API_KEY', os.getenv('GEMINI_API_KEY', '')),
+)
+RAG_GEMINI_OUTPUT_DIMENSIONALITY = ConfigVar(
+    'RAG_GEMINI_OUTPUT_DIMENSIONALITY',
+    'rag.gemini_output_dimensionality',
+    int(os.getenv('RAG_GEMINI_OUTPUT_DIMENSIONALITY', '3072')),
+)
+
 RAG_AZURE_OPENAI_BASE_URL = ConfigVar(
     'RAG_AZURE_OPENAI_BASE_URL',
     'rag.azure_openai.base_url',
