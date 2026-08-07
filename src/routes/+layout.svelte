@@ -73,7 +73,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getUserSettings } from '$lib/apis/users';
 	import dayjs from 'dayjs';
-	import { getChannels } from '$lib/apis/channels';
+	import { getAllUnreadChannelMentions, getChannels } from '$lib/apis/channels';
 
 	const unregisterServiceWorkers = async () => {
 		if ('serviceWorker' in navigator) {
@@ -1032,6 +1032,24 @@
 						settings.set({});
 					}
 				}
+
+				// Replay mentions created while this user was logged out.
+				const pendingMentions = await getAllUnreadChannelMentions(localStorage.token).catch(() => []);
+				for (const mention of pendingMentions) {
+					unreadChannelMentions.update((current) => ({
+						...current,
+						[mention.channel_id]: [...new Set([...(current[mention.channel_id] ?? []), mention.message_id])]
+					}));
+					toast.custom(NotificationToast, {
+						componentProps: {
+							onClick: () => goto(`/channels/${mention.channel_id}`),
+							title: `You were mentioned in #${mention.channel_name}`,
+							content: mention.content
+						},
+						duration: 15000,
+						unstyled: true
+					});
+				}
 				setTextScale($settings?.textScale ?? 1);
 
 				// Set up the token expiry check
@@ -1191,7 +1209,7 @@
 
 <svelte:head>
 	<title>{$WEBUI_NAME}</title>
-	<link crossorigin="anonymous" rel="icon" href="{WEBUI_BASE_URL}/static/favicon.png" />
+	<link rel="icon" href="{WEBUI_BASE_URL}/static/favicon.png" />
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
 	<meta name="description" content={$WEBUI_NAME} />

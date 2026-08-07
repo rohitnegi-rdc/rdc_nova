@@ -43,6 +43,14 @@ export const createNewChannel = async (token: string = '', channel: ChannelForm)
 	return res;
 };
 
+export const getAllUnreadChannelMentions = async (token: string = '') => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/channels/mentions/unread`, {
+		headers: { authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw await res.json();
+	return await res.json();
+};
+
 export const getUnreadChannelMentions = async (token: string = '', channel_id: string) => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/channels/${channel_id}/mentions/unread`, {
 		headers: { authorization: `Bearer ${token}` }

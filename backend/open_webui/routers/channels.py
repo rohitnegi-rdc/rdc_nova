@@ -60,6 +60,32 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get('/mentions/unread', response_model=list[dict])
+async def get_all_unread_channel_mentions(
+    request: Request,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Return persisted mentions so logged-out users see them after login."""
+    await check_channels_access(request, user)
+    channels = await Channels.get_channels_by_user_id(user.id, db=db)
+    pending = []
+    for channel in channels:
+        for message_id in await Channels.get_unread_mention_ids(channel.id, user.id, db=db):
+            message = await Messages.get_message_by_id(message_id, include_thread_replies=False, db=db)
+            if message:
+                pending.append(
+                    {
+                        'channel_id': channel.id,
+                        'channel_name': channel.name,
+                        'message_id': message.id,
+                        'content': message.content,
+                        'parent_id': message.parent_id,
+                    }
+                )
+    return pending
+
+
 async def channel_has_access(
     user_id: str,
     channel: ChannelModel,

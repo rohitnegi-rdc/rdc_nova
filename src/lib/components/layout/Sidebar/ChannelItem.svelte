@@ -4,7 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import { page } from '$app/stores';
-	import { channels, mobile, showSidebar, user } from '$lib/stores';
+	import { channels, mobile, showSidebar, unreadChannelMentions, user } from '$lib/stores';
 	import { getUserActiveStatusById } from '$lib/apis/users';
 	import { updateChannelById, updateChannelMemberActiveStatusById } from '$lib/apis/channels';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -25,6 +25,7 @@
 	let showEditChannelModal = false;
 
 	let itemElement;
+	$: unreadMentionCount = $unreadChannelMentions[channel?.id]?.length ?? 0;
 
 	const hasPublicReadGrant = (grants: any) =>
 		Array.isArray(grants) &&
@@ -189,6 +190,17 @@
 		</div>
 
 		<div class="flex items-center">
+			{#if unreadMentionCount > 0}
+				<div
+					class="text-xs py-[1px] px-2 mr-1 rounded-xl bg-sky-500 text-white font-bold whitespace-nowrap"
+					aria-label={$i18n.t('You have unread mentions')}
+				>
+					@{new Intl.NumberFormat($i18n.locale, {
+						notation: 'compact',
+						compactDisplay: 'short'
+					}).format(unreadMentionCount)}
+				</div>
+			{/if}
 			{#if channel?.unread_count > 0}
 				<div
 					class="text-xs py-[1px] px-2 rounded-xl bg-gray-100 text-black dark:bg-gray-800 dark:text-white font-medium whitespace-nowrap"
