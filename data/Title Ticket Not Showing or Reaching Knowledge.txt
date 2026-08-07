@@ -1,0 +1,29 @@
+Title: Ticket Not Showing or Reaching in IDS
+
+Category: Troubleshooting
+
+Tags: IDS, ticket, mix design, FG code, ERP, material code, RDC service
+
+Problem 1: New Mix Design or FG Code does not appear in IDS
+Solution: Update the Mix Design again in ERP to re-push it to IDS.
+
+Problem 2: IDS RDC Import Live Service is off or not running
+Solution:
+
+Click on the Search Bar and type "Services", then open it.
+Click on any service and press the letter "I" on the keyboard.
+Locate "IDS RDC Import Live Service".
+Click the Restart button.
+Reference Guide: https://youtu.be/h8qkN_VA2nw
+Problem 3: Material Codes used in the Mix Design do not exist in IDS
+Solution:
+
+Go to QC Control.
+1. Click on Materials.
+2. Click the "+" (Plus) button to add a new material.
+3. Paste the Material Code as per ERP.
+4. Paste the Material Name as per ERP.
+5. Select the appropriate Family Code.
+6. Click Save.
+Note: All Material Codes used in a Mix Design must exist in IDS before the ticket can appear.
+Summary: If a ticket is not showing in IDS, check whether the Mix Design was pushed correctly from ERP, ensure the IDS RDC Import Live Service is running, and verify that all Material Codes from the Mix Design exist in IDS.

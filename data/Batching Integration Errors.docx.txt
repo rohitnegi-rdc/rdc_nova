@@ -1,0 +1,67 @@
+Q: Water (RM) is taking in manual but not in auto.
+
+A: Abort the running batch and get the data pushed by IT. After that contact IDS helpline.
+
+Q: Ticket is not showing in IDS software.
+
+A: Check Service is on, check all materials available in IDS with event viewer, update the mix design in ERP.
+
+Q: Final submission not happening. Unable to print invoice.
+
+A: Check event viewer and RDC Online Batch Data Report in ERP. If data is not showing in the report, post it in the Integration forum.
+
+Q: Gate overloaded fault.
+
+A: Abort the running batch and get the data pushed by IT. Take a fresh load after checking the Mix design.
+
+Q: RAW MATERIAL DETAILS NOT VISIBLE in ERP SO.
+
+A: Update the mix-design in ERP and make sure VPN & Services are running.
+
+Q: Event view is showing error log Ticket - 103126600103-1.32 - Is in use. Cannot delete.
+
+A: It means the batch already started, so we cannot delete it. Complete the batch.
+
+Q: Vpn not connecting.
+
+A: Mail / Contact IT helpdesk.
+
+Q: Please add FAMSAND code in iot.
+
+A: To add material in IDS, go to QC control -> Click materials -> click (+) add symbol -> add the material code as per ERP, then save and assign the bin in Configbom.
+
+Q: Sir issue with ERP design and Ids design.
+
+A: Update the design in ERP and make sure the service is on and VPN is connected.
+
+Q: Mixer not ready fault aa rha hai.
+
+A: Check the previous batch completion properly. Make sure all controls are on/auto mode in HMI.
+
+Q: PLC not getting connected.
+
+A: Check the ping in CMD – "ping 192.168.1.190 –t". If not pinging, check for the PLC cable if there is any damage.
+
+Q: IDS not opening.
+
+A: Check Mysql is running in service. If running and still the same issue is found, contact the IDS helpline.
+
+Q: SIR CEMENT filling fault AA RAHA HA PLEASE CHICH.
+
+A: Abort the running batch and make sure that the correct SILO is Assigned.
+
+Q: ADMIXTURE DOSING MORE THAN TARGET.
+
+A: Abort the batch and update the design in ERP.
+
+Q: Data record fault.
+
+A: It means the PLC disconnected for a fraction of a second while running. Abort the batch and start a fresh load.
+
+Q: IDS touch panel/HMI showing error.
+
+A: Contact IDS helpline.
+
+Q: When I submit the ticket, it is not reflecting in IDS. I deleted the ticket and raised it again in ERP, and now it is showing as submitted.
+
+A: If deletion was tried before the Ticket reached IDS, the SO will be blocked. Use a new SO.

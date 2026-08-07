@@ -1,0 +1,130 @@
+IDS Edge Batching Software – Knowledge Base
+Source: RDC Operations Guide (Video Series)
+Document 1: Adding Raw Materials – Manual Feed
+Title: How to Add Manually Fed Raw Materials in IDS Edge Batching Software (RDC)
+
+Tags: raw material, manual feed, IDS Edge, batching software, RDC, UTLFNE, FIBRE, FIBREPE, MSILICA, EPSTB, skip bucket, aggregate conveyor, mixer
+
+Description:
+This guide explains how to add new raw materials that are fed manually in the IDS Edge batching software for RDC (Ready-mix/Dry mix concrete) plants. Manual feeding refers to the process where materials are fed by hand — directly into the skip bucket, aggregate conveyor, or mixer — without the use of any conveyor, motor, screw conveyor, or weighing scale.
+
+Examples of manually fed raw materials include:
+
+UTLFNE (Ultra Fine)
+FIBRE
+FIBREPE (Fibre Polyethylene)
+MSILICA (Micro Silica)
+EPSTB (EPS beads/stabilizer)
+Use this guide when: You need to configure a new raw material in IDS Edge that does not use automated equipment for feeding and is added manually by an operator.
+
+Reference Video: https://youtu.be/CIi0asOp05o
+
+Document 2: Adding Raw Materials – Automatic Feed
+Title: How to Add Automatically Fed Raw Materials in IDS Edge Batching Software (RDC)
+
+Tags: raw material, auto feed, automatic, IDS Edge, batching software, RDC, CEMENT, FLYASH, ULTRAFINE, FIBRE, WATER, ADMIXTURE, AGGREGATE, conveyor, screw conveyor, weighing scale, motor
+
+Description:
+This guide explains how to add new raw materials that are fed automatically in the IDS Edge batching software for RDC plants. Automatic feeding means the material is dispensed using automated equipment such as conveyors, motors, screw conveyors, or weighing scales — without any manual human intervention during the batching process.
+
+Examples of automatically fed raw materials include:
+
+CEMENT
+FLYASH (Fly Ash)
+ULTRAFINE
+FIBRE
+WATER
+ADMIXTURE
+AGGREGATE
+Use this guide when: You need to configure a new raw material in IDS Edge that is delivered automatically via equipment integrated with the batching system.
+
+Reference Video: https://youtu.be/JAD-kWQn0qg
+
+Document 3: Assigning BIN/SILO to a Product (Mix Design)
+Title: How to Change or Assign BIN/SILO to a Product in IDS Edge Batching Software (RDC)
+
+Tags: BIN, SILO, assignment, mix design, IDS Edge, batching software, RDC, cement silo, water weigher, admixture jar, aggregate bin, product configuration
+
+Description:
+This guide explains how to change or assign a BIN or SILO to a specific product available in the mix design for batching in IDS Edge. Each raw material used in a mix design must be mapped to its corresponding physical storage or dispensing unit.
+
+Examples of BIN/SILO assignments include:
+
+Cement Silo → for CEMENT material
+Water Weigher → for WATER material
+Admixture Jar → for ADMIXTURE material
+Aggregate Bins → for AGGREGATE material
+Use this guide when: You need to link or update which physical BIN or SILO is used for a particular ingredient in a product's mix design, before starting a batching operation.
+
+Reference Video: https://youtu.be/2I-9SzQfkz4
+
+Document 4: Running Two BINs/SILOs Simultaneously (Coarse Feeding / Parallel Feed)
+Title: How to Run Two BINs/SILOs Simultaneously (Parallel / Coarse Feeding) in IDS Edge Batching Software (RDC)
+
+Tags: parallel feed, coarse feeding, two silos, simultaneous bins, IDS Edge, batching software, RDC, cement silo, reduce feeding time, dual silo, batch speed
+
+Description:
+This guide explains how to configure and run two BINs or SILOs simultaneously (in parallel) in IDS Edge for RDC batching. This feature is also known as Coarse Feeding. Running two bins/silos at the same time — for example, two cement silos in parallel — reduces the total feeding time per batch and increases throughput.
+
+Key concepts:
+
+Two silos feeding the same material at the same time
+Commonly used for CEMENT when a single silo is slow to dispense
+Also referred to as Coarse Feeding in IDS Edge
+Use this guide when: You want to speed up batching by enabling two silos or bins to feed the same material simultaneously.
+
+Reference Video: https://youtu.be/bYw09ubvZtM
+
+Document 5: Event Viewer – Usage and How to Open It (RDC Batching Troubleshooting)
+Title: Event Viewer – What It Is, Why It's Used, and How to Open It for RDC Batching Issues
+
+Tags: event viewer, troubleshooting, IDS Edge, batching software, RDC, error log, issue diagnosis, PC, Windows event viewer, batching problem
+
+Description:
+This guide explains the Event Viewer tool, its purpose in diagnosing batching issues, and how to open it on a PC. The Event Viewer records system and application events, errors, and warnings that occur during batching operations. It is the first tool to check when an issue is encountered during RDC batching.
+
+Key points:
+
+What the Event Viewer is and what information it captures
+Why it is important for diagnosing batching problems
+Step-by-step instructions on how to open Event Viewer on a PC
+How to use it to investigate errors in the IDS Edge batching system
+Use this guide when: You encounter any error, unexpected behavior, or failure during batching and need to investigate the root cause using system logs.
+
+Reference Video: https://youtu.be/04HNO5LzhoU
+
+Document 6: Adding a New Sales Order (SO) in IDS Edge – Offline Mode
+Title: How to Add a New (Unused) Sales Order in IDS Edge – Including Offline / ERP Offline Mode
+
+Tags: sales order, SO, IDS Edge, offline mode, ERP offline, add SO, RDC, head office approval, HO approval, unused sales order, manual SO entry
+
+Description:
+This guide explains how to add a newly created but unused Sales Order (SO) into IDS Edge. This process is required when the ERP system is offline or not running. Since SO addition in offline mode is a sensitive operation, Head Office (HO) approval must be obtained before proceeding.
+
+Key points:
+
+How to add a new Sales Order (SO) that was created but not yet used in IDS Edge
+The correct procedure when the ERP system is offline
+Requirement to obtain HO (Head Office) approval before adding the SO in offline mode
+Risks and controls associated with offline SO entry
+Use this guide when: You need to add a Sales Order into IDS Edge and the ERP system is currently offline or unavailable. Always get HO approval before performing this action.
+
+Reference Video: https://youtu.be/bqPcZrr9MSU
+
+Document 7: IDS Edge Service – What It Is and How to Start It
+Title: What Is the IDS Edge Service, Why Is It Required, and How to Start It
+
+Tags: service, IDS Edge service, start service, batching software, RDC, Windows service, background service, IDS Edge not working, service restart
+
+Description:
+This guide explains what a "service" is in the context of IDS Edge batching software, why it is required for the system to function, and the steps to start or restart it when needed.
+
+Key points:
+
+Definition and role of the IDS Edge service (background process that enables batching operations)
+Why the service is critical — batching cannot function without it running
+How to check if the service is running
+Step-by-step instructions to start or restart the service on a PC
+Use this guide when: IDS Edge is not functioning, batching is not responding, or you have been asked to check/start the service as part of troubleshooting.
+
+Reference Video: https://youtu.be/h8qkN_VA2nw
