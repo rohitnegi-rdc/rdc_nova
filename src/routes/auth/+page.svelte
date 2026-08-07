@@ -261,7 +261,6 @@
 								<div class="flex justify-center mb-6">
 									<img
 										id="logo"
-										crossorigin="anonymous"
 										src="{WEBUI_BASE_URL}/static/favicon.png"
 										class="size-24 rounded-full"
 										alt="{$WEBUI_NAME} logo"
@@ -613,7 +612,6 @@
 					<div class=" self-center">
 						<img
 							id="logo"
-							crossorigin="anonymous"
 							src="{WEBUI_BASE_URL}/static/favicon.png"
 							class=" w-6 rounded-full"
 							alt=""
