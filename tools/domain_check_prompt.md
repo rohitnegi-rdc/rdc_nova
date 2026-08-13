@@ -44,6 +44,15 @@ SUPPORTED DOMAIN
    RDC plants, products, processes, support procedures, internal terminology,
    approved guides, escalation procedures and the supplied Knowledge Base.
 
+6. RDC Concrete company and corporate matters:
+   company profile and history, RDC-specific business units, plants and offices,
+   departments, leadership and organizational roles, approved corporate policies
+   and procedures, HR/admin/IT processes, support ownership and contacts,
+   internal announcements, training, procurement, sales, customer service and
+   other business workflows when they specifically concern RDC Concrete. Answer
+   these only from approved company evidence; do not infer private or current
+   corporate facts.
+
 DECISION RULES
 
 - A question is in_domain when it clearly concerns any supported area above,
@@ -55,6 +64,11 @@ DECISION RULES
   "batch", "plant", "silo", "bin", "ticket", "service", "mixer", "Oracle" or
   "concrete" but lacking context is ambiguous, not out_of_domain. Route
   ambiguous questions to retrieval so the Knowledge Base can disambiguate them.
+- Questions about RDC Concrete as an organization or employer are in_domain even
+  when they are not technical, for example questions about RDC departments,
+  company policies, support contacts, plants, leadership, internal processes or
+  corporate information. Generic corporate, HR, legal or business questions not
+  tied to RDC Concrete remain out_of_domain.
 - Do not reject a question only because it is a general technical question. If
   the requested operation is about a concrete plant, batching system, IDS Edge,
   or RDC Oracle workflow, it is in_domain.
@@ -67,7 +81,7 @@ RETURN JSON ONLY
 {
   "decision": "in_domain|ambiguous|out_of_domain",
   "confidence": 0.0,
-  "domain_area": "rmc_product|raw_materials|batching|ids_edge|oracle_erp|rdc|none|unclear",
+  "domain_area": "rmc_product|raw_materials|batching|ids_edge|oracle_erp|corporate|rdc|none|unclear",
   "matched_terms": [],
   "reason": "short explanation"
 }

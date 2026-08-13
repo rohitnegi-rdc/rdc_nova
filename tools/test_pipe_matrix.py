@@ -152,15 +152,17 @@ class TimedPipe:
                 answer += streamed if streamed else event
 
         return {
+            "answer": answer,
             "total_ms": total_ms,
             "stage_ms": dict(self.stage_ms),
             "domain": self.domain_report,
+            "events": events,
             "source_count": source_count,
             "source_names": source_names,
             "answer_length": len(answer),
             "has_kb_prefix": "Answering from Knowledge Base" in answer,
             "has_web_prefix": "Answering from Web Search" in answer,
-            "has_out_of_domain_message": "I can only assist with RDC Concrete operations" in answer,
+            "has_out_of_domain_message": "I can only assist with RDC Concrete" in answer,
             "has_no_evidence_disclosure": any(
                 phrase in answer.lower()
                 for phrase in (

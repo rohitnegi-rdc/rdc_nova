@@ -8,9 +8,11 @@ requirements: google-genai, langsmith
 
 import asyncio
 import copy
+import inspect
 import re
 import json
 import os
+import time
 from collections import defaultdict
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlparse
@@ -48,6 +50,13 @@ The supported domain includes:
    operational context is obvious.
 5. RDC Concrete itself, its plants, products, processes, internal terminology,
    support procedures and supplied Knowledge Base.
+6. RDC Concrete company and corporate matters: company profile and history,
+   RDC-specific business units, plants and offices, departments, leadership and
+   organizational roles, approved corporate policies and procedures, HR/admin/IT
+   processes, support ownership and contacts, internal announcements, training,
+   procurement, sales, customer-service and other business workflows when they
+   specifically concern RDC Concrete. Answer these only from approved company
+   evidence; do not infer private or current corporate facts.
 
 Decision rules:
 - A question is in_domain when it clearly concerns any supported area, even if it
@@ -58,12 +67,17 @@ Decision rules:
 - A short question containing a potentially domain-related word such as batch,
   plant, silo, bin, ticket, service, mixer, Oracle or concrete but lacking context
   is ambiguous, not out_of_domain. Ambiguous questions continue to retrieval.
+- Questions about RDC Concrete as an organization or employer are in_domain even
+  when they are not technical, for example questions about RDC departments,
+  company policies, support contacts, plants, leadership, internal processes or
+  corporate information. Generic corporate, HR, legal or business questions not
+  tied to RDC Concrete remain out_of_domain.
 - Mark out_of_domain only when the question is clearly unrelated to all supported
   areas and has no plausible RDC/RMC/IDS/Oracle operational interpretation.
 - Do not answer, solve, browse, retrieve or cite anything in this step.
 
 Return JSON only:
-{"decision":"in_domain|ambiguous|out_of_domain","confidence":0.0,"domain_area":"rmc_product|raw_materials|batching|ids_edge|oracle_erp|rdc|none|unclear","matched_terms":[],"reason":"short explanation"}
+{"decision":"in_domain|ambiguous|out_of_domain","confidence":0.0,"domain_area":"rmc_product|raw_materials|batching|ids_edge|oracle_erp|corporate|rdc|none|unclear","matched_terms":[],"reason":"short explanation"}
 
 Confidence is confidence in the classification, not confidence that the Knowledge
 Base contains the answer. Low-confidence or malformed output must be treated as
@@ -98,6 +112,80 @@ class TraceSession:
         self.endpoint = endpoint
         self.project = project
         self.error = None
+
+    async def begin_step(
+        self,
+        name: str,
+        inputs: dict[str, Any],
+        run_type: str = "chain",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Open a child span before the operation it represents starts."""
+        if self.root is None:
+            return None
+        try:
+            extra = {"metadata": metadata} if metadata else None
+            child = self.root.create_child(name=name, run_type=run_type, inputs=inputs, extra=extra)
+            await asyncio.to_thread(child.post)
+            return {"run": child, "started_at": time.perf_counter()}
+        except Exception:
+            return None
+
+    async def end_step(
+        self,
+        handle: Optional[dict[str, Any]],
+        outputs: dict[str, Any],
+        error: Optional[str] = None,
+        usage_metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Close a child span after its operation has completed."""
+        if not handle or handle.get("ended"):
+            return
+        child = handle.get("run")
+        if child is None:
+            return
+        try:
+            duration_ms = round((time.perf_counter() - handle["started_at"]) * 1000, 1)
+            traced_outputs = dict(outputs or {})
+            traced_outputs.setdefault("duration_ms", duration_ms)
+            traced_outputs.setdefault("timing_status", "error" if error else "measured")
+            if usage_metadata:
+                child.set(usage_metadata=usage_metadata)
+            child.end(outputs=traced_outputs, error=error)
+            await asyncio.to_thread(child.patch)
+            handle["ended"] = True
+        except Exception:
+            return
+
+    async def measure(
+        self,
+        name: str,
+        inputs: dict[str, Any],
+        operation: Any,
+        output_builder: Any = None,
+        usage_builder: Any = None,
+        run_type: str = "chain",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> Any:
+        """Run an operation inside a correctly timed LangSmith child span."""
+        handle = await self.begin_step(name, inputs, run_type=run_type, metadata=metadata)
+        try:
+            result = await operation()
+        except Exception as exc:
+            await self.end_step(
+                handle,
+                {"error_type": type(exc).__name__, "error": str(exc)},
+                error=type(exc).__name__,
+            )
+            raise
+        outputs = output_builder(result) if output_builder else (result if isinstance(result, dict) else {"result": result})
+        if inspect.isawaitable(outputs):
+            outputs = await outputs
+        usage_metadata = usage_builder(result) if usage_builder else None
+        if inspect.isawaitable(usage_metadata):
+            usage_metadata = await usage_metadata
+        await self.end_step(handle, outputs, usage_metadata=usage_metadata)
+        return result
 
     async def start(self, inputs: dict[str, Any]) -> None:
         key = self.api_key or os.getenv("LANGCHAIN_API_KEY", "")
@@ -141,17 +229,10 @@ class TraceSession:
         metadata: Optional[dict[str, Any]] = None,
         usage_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
-        if self.root is None:
-            return
-        try:
-            extra = {"metadata": metadata} if metadata else None
-            child = self.root.create_child(name=name, run_type=run_type, inputs=inputs, extra=extra)
-            if usage_metadata:
-                child.set(usage_metadata=usage_metadata)
-            child.end(outputs=outputs, error=error)
-            await asyncio.to_thread(child.post)
-        except Exception:
-            return
+        handle = await self.begin_step(name, inputs, run_type=run_type, metadata=metadata)
+        snapshot_outputs = dict(outputs or {})
+        snapshot_outputs.setdefault("timing_status", "skipped" if snapshot_outputs.get("skipped") else "snapshot")
+        await self.end_step(handle, snapshot_outputs, error=error, usage_metadata=usage_metadata)
 
     async def finish(self, outputs: dict[str, Any], error: Optional[str] = None) -> None:
         if self.root is None:
@@ -165,7 +246,7 @@ class TraceSession:
 
 class Pipe:
     OUT_OF_DOMAIN_MESSAGE = (
-        "I can only assist with RDC Concrete operations, batching, and ERP queries. "
+        "I can only assist with RDC Concrete company, operations, batching, and ERP queries. "
         "For other assistance, please contact Admin support at 82918 91159 or 86570 49242."
     )
 
@@ -582,12 +663,35 @@ EVIDENCE:\n{evidence}"""
 
     @staticmethod
     def _web_queries(query: str) -> list[str]:
-        """Generate focused queries for the user's IDS/Oracle operating domain."""
+        """Use the user's query directly to avoid injecting unrelated domain terms."""
         return [
-            f'"IDS" batching "{query}"',
-            f'"IDS" (BIN OR SILO) (feeding OR "parallel feed") "{query}"',
-            f'"IDS" ("Oracle ERP" OR Oracle) batching "{query}"',
+            query
         ]
+
+    @staticmethod
+    def _is_corporate_query(query: str) -> bool:
+        query_text = str(query or "").lower()
+        has_rdc = bool(re.search(r"\brdc(?:\s+concrete)?\b", query_text)) or "rdcconcrete" in query_text.replace(" ", "")
+        corporate_terms = (
+            "ceo",
+            "chief executive",
+            "managing director",
+            "leadership",
+            "company",
+            "corporate",
+            "organization",
+            "organisation",
+            "head office",
+            "department",
+            "policy",
+            "history",
+            "founder",
+            "employee",
+            "employer",
+            "human resources",
+            "hr ",
+        )
+        return has_rdc and any(term in query_text for term in corporate_terms)
 
     @staticmethod
     def _web_result_dict(result: Any, query: str) -> dict[str, Any]:
@@ -600,7 +704,7 @@ EVIDENCE:\n{evidence}"""
 
     @staticmethod
     def _web_prefilter(candidate: dict[str, Any], query: str) -> Optional[str]:
-        """Reject obvious non-IDS/non-Oracle results before page loading."""
+        """Reject unrelated pages while allowing RDC corporate evidence."""
         url = candidate.get("url", "")
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -610,11 +714,50 @@ EVIDENCE:\n{evidence}"""
             str(candidate.get(field, ""))
             for field in ("url", "title", "snippet")
         ).lower()
+        blocked_page_markers = (
+            "just a moment...",
+            "enable javascript and cookies to continue",
+            "checking your browser",
+            "cf-chl-",
+            "cloudflare ray id",
+            "please verify you are a human",
+        )
+        if any(marker in text for marker in blocked_page_markers):
+            return "blocked_or_challenge_page"
         has_ids = bool(re.search(r"\bids\b", text))
         has_oracle_erp = any(
             marker in text
             for marker in ("oracle erp", "oracle fusion erp", "oracle enterprise resource planning")
         )
+        has_rdc_company = (
+            bool(re.search(r"\brdc(?:\s+concrete)?\b", text))
+            or "rdcconcrete" in text.replace(" ", "")
+            or "rdc.in" in text
+        )
+        if Pipe._is_corporate_query(query):
+            corporate_terms = (
+                "ceo",
+                "chief executive",
+                "managing director",
+                "leadership",
+                "company",
+                "corporate",
+                "organization",
+                "organisation",
+                "head office",
+                "department",
+                "policy",
+                "history",
+                "founder",
+                "employee",
+                "employer",
+                "human resources",
+            )
+            if not has_rdc_company:
+                return "missing_rdc_corporate_marker"
+            if not any(term in text for term in corporate_terms):
+                return "missing_corporate_marker"
+            return None
         if not has_ids and not has_oracle_erp:
             return "missing_ids_or_oracle_marker"
         if not any(term in text for term in ("batch", "silo", "bin", "feed", "concrete", "erp")):
@@ -633,7 +776,7 @@ EVIDENCE:\n{evidence}"""
         query: str,
         candidates: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Require explicit IDS/Oracle relevance and direct question support."""
+        """Require direct support from operational or RDC corporate evidence."""
         if not candidates:
             return [], {
                 "decision": {"accepted_ranks": [], "rejected_ranks": [], "reason": "No web candidates passed prefilter."},
@@ -644,13 +787,24 @@ EVIDENCE:\n{evidence}"""
             f"RANK {candidate['rank']}\nTITLE: {candidate['title']}\nURL: {candidate['url']}\nCONTENT:\n{candidate['content']}"
             for candidate in candidates
         )
-        prompt = f"""You are a strict web-evidence validator for an IDS Batching and Oracle ERP assistant.
+        if self._is_corporate_query(query):
+            validation_rules = """You are a strict web-evidence validator for RDC Concrete corporate questions.
+Return JSON only with this schema: {\"accepted_ranks\": [1], \"rejected_ranks\": [2], \"reason\": \"...\"}.
+Accept a page only when BOTH conditions are true:
+1. It explicitly concerns RDC Concrete as a company, including its leadership, organization, offices, policies, history, or corporate operations.
+2. It directly supports the user's question.
+Reject generic company, CEO, construction, concrete, or other-vendor pages that do not clearly concern RDC Concrete.
+Do not answer the question."""
+        else:
+            validation_rules = """You are a strict web-evidence validator for an IDS Batching and Oracle ERP assistant.
 Return JSON only with this schema: {{\"accepted_ranks\": [1], \"rejected_ranks\": [2], \"reason\": \"...\"}}.
 Accept a page only when BOTH conditions are true:
 1. It explicitly concerns IDS/IDS Batching or Oracle ERP in an operational batching context.
 2. It directly supports the user's question.
 Reject generic silo, BIN, concrete, animal-feed, gaming, research, or other-vendor pages even if they sound similar.
 Do not answer the question.
+"""
+        prompt = f"""{validation_rules}
 
 QUESTION: {query}
 WEB EVIDENCE:\n{evidence}"""
@@ -682,8 +836,9 @@ WEB EVIDENCE:\n{evidence}"""
         query: str,
         user: Any,
         include_content: bool,
+        trace: Optional[TraceSession] = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Search using Open WebUI's configured engine and fail closed on web evidence."""
+        """Search, filter/fetch, and validate web evidence with timed trace stages."""
         from open_webui.retrieval.web.utils import get_web_loader
         from open_webui.routers.retrieval import search_web
 
@@ -698,76 +853,177 @@ WEB EVIDENCE:\n{evidence}"""
             "search_results": [],
             "prefilter_rejections": [],
             "fetch_errors": [],
+            "fetch_warnings": [],
         }
 
-        search_batches = await asyncio.gather(
-            *(search_web(request, engine, search_query, user) for search_query in queries),
-            return_exceptions=True,
+        async def run_search() -> dict[str, Any]:
+            search_batches = await asyncio.gather(
+                *(search_web(request, engine, search_query, user) for search_query in queries),
+                return_exceptions=True,
+            )
+            candidates: list[dict[str, Any]] = []
+            errors: list[dict[str, Any]] = []
+            for search_query, batch in zip(queries, search_batches):
+                if isinstance(batch, Exception):
+                    errors.append({"query": search_query, "stage": "search", "error": str(batch)})
+                    continue
+                for result in batch or []:
+                    candidates.append(self._web_result_dict(result, search_query))
+            return {"candidates": candidates, "errors": errors}
+
+        search_result = await (
+            trace.measure(
+                "04-web-search",
+                {"query": query, "engine": engine, "queries": queries},
+                run_search,
+                output_builder=lambda result: {
+                    "enabled": True,
+                    "result_count": len(result["candidates"]),
+                    "search_results": [
+                        {key: value for key, value in candidate.items() if key != "snippet" or include_content}
+                        for candidate in result["candidates"]
+                    ],
+                    "errors": result["errors"],
+                    "timing_status": "measured",
+                },
+            )
+            if trace
+            else run_search()
         )
-        candidates_by_url: dict[str, dict[str, Any]] = {}
-        for search_query, batch in zip(queries, search_batches):
-            if isinstance(batch, Exception):
-                report["fetch_errors"].append({"query": search_query, "stage": "search", "error": str(batch)})
-                continue
-            for result in batch or []:
-                candidate = self._web_result_dict(result, search_query)
-                report["search_results"].append(
-                    {key: value for key, value in candidate.items() if key != "snippet" or include_content}
-                )
+        report["search_results"] = [
+            {key: value for key, value in candidate.items() if key != "snippet" or include_content}
+            for candidate in search_result["candidates"]
+        ]
+        report["fetch_errors"].extend(search_result["errors"])
+
+        async def run_filter() -> dict[str, Any]:
+            candidates_by_url: dict[str, dict[str, Any]] = {}
+            prefilter_rejections: list[dict[str, Any]] = []
+            for candidate in search_result["candidates"]:
                 reason = self._web_prefilter(candidate, query)
                 if reason:
-                    report["prefilter_rejections"].append({**candidate, "reason": reason})
+                    prefilter_rejections.append({**candidate, "reason": reason})
                     continue
                 existing = candidates_by_url.get(candidate["url"])
                 if existing:
-                    existing["queries"] = sorted(set(existing.get("queries", []) + [search_query]))
+                    existing["queries"] = sorted(set(existing.get("queries", []) + [candidate["query"]]))
                 else:
-                    candidate["queries"] = [search_query]
+                    candidate["queries"] = [candidate["query"]]
                     candidates_by_url[candidate["url"]] = candidate
 
-        candidates = list(candidates_by_url.values())[:count]
-        urls = [candidate["url"] for candidate in candidates]
-        if urls:
-            try:
-                loader = get_web_loader(
-                    urls,
-                    verify_ssl=self._config_value(config, "ENABLE_WEB_LOADER_SSL_VERIFICATION", True),
-                    requests_per_second=self._config_value(config, "WEB_LOADER_CONCURRENT_REQUESTS", 2),
-                    trust_env=self._config_value(config, "WEB_SEARCH_TRUST_ENV", True),
+            candidates = list(candidates_by_url.values())[:count]
+            urls = [candidate["url"] for candidate in candidates]
+            docs_by_url: dict[str, str] = {}
+            fetch_errors: list[dict[str, Any]] = []
+            if urls:
+                try:
+                    loader = get_web_loader(
+                        urls,
+                        verify_ssl=self._config_value(config, "ENABLE_WEB_LOADER_SSL_VERIFICATION", True),
+                        requests_per_second=self._config_value(config, "WEB_LOADER_CONCURRENT_REQUESTS", 2),
+                        trust_env=self._config_value(config, "WEB_SEARCH_TRUST_ENV", True),
+                    )
+                    docs = await loader.aload()
+                    docs_by_url = {
+                        str(doc.metadata.get("source", "")): doc.page_content
+                        for doc in docs
+                        if doc.metadata.get("source")
+                    }
+                except Exception as exc:
+                    fetch_errors.append({"stage": "page_load", "error": str(exc)})
+
+            max_chars = int(self._setting("WEB_SEARCH_MAX_CONTENT_CHARS"))
+            validator_candidates: list[dict[str, Any]] = []
+            warnings: list[dict[str, Any]] = []
+            for rank, candidate in enumerate(candidates, 1):
+                page_content = docs_by_url.get(candidate["url"])
+                content_source = "page"
+                content = page_content or candidate.get("snippet", "")
+                if page_content and self._web_prefilter(
+                    {**candidate, "snippet": str(page_content)[:max_chars]}, query
+                ) == "blocked_or_challenge_page":
+                    content = candidate.get("snippet", "")
+                    content_source = "search_snippet_fallback"
+                    warnings.append(
+                        {
+                            "url": candidate["url"],
+                            "stage": "page_load",
+                            "warning": "Page returned a browser challenge; using the search-result snippet only.",
+                        }
+                    )
+                if not content:
+                    prefilter_rejections.append({**candidate, "rank": rank, "reason": "empty_page_content"})
+                    continue
+                content_candidate = {**candidate, "snippet": str(content)[:max_chars]}
+                reason = self._web_prefilter(content_candidate, query)
+                if reason:
+                    prefilter_rejections.append({**candidate, "rank": rank, "reason": reason})
+                    continue
+                validator_candidates.append(
+                    {
+                        **candidate,
+                        "rank": rank,
+                        "content": str(content)[:max_chars],
+                        "content_source": content_source,
+                    }
                 )
-                docs = await loader.aload()
-                docs_by_url = {
-                    str(doc.metadata.get("source", "")): doc.page_content
-                    for doc in docs
-                    if doc.metadata.get("source")
-                }
-            except Exception as exc:
-                docs_by_url = {}
-                report["fetch_errors"].append({"stage": "page_load", "error": str(exc)})
-        else:
-            docs_by_url = {}
+            return {
+                "validator_candidates": validator_candidates,
+                "prefilter_rejections": prefilter_rejections,
+                "fetch_errors": fetch_errors,
+                "fetch_warnings": warnings,
+            }
 
-        max_chars = int(self._setting("WEB_SEARCH_MAX_CONTENT_CHARS"))
-        validator_candidates = []
-        for rank, candidate in enumerate(candidates, 1):
-            content = docs_by_url.get(candidate["url"]) or candidate.get("snippet", "")
-            if not content:
-                report["prefilter_rejections"].append({**candidate, "rank": rank, "reason": "empty_page_content"})
-                continue
-            content_candidate = {**candidate, "snippet": str(content)[:max_chars]}
-            reason = self._web_prefilter(content_candidate, query)
-            if reason:
-                report["prefilter_rejections"].append({**candidate, "rank": rank, "reason": reason})
-                continue
-            validator_candidates.append(
-                {
-                    **candidate,
-                    "rank": rank,
-                    "content": str(content)[:max_chars],
-                }
+        filter_result = await (
+            trace.measure(
+                "05-web-filter",
+                {"query": query, "candidate_count": len(search_result["candidates"])},
+                run_filter,
+                output_builder=lambda result: {
+                    "prefilter_rejections": result["prefilter_rejections"],
+                    "fetched_candidates": [
+                        {
+                            key: value
+                            for key, value in candidate.items()
+                            if key != "content" or include_content
+                        }
+                        for candidate in result["validator_candidates"]
+                    ],
+                    "fetch_errors": result["fetch_errors"],
+                    "fetch_warnings": result["fetch_warnings"],
+                },
             )
+            if trace
+            else run_filter()
+        )
+        report["prefilter_rejections"] = filter_result["prefilter_rejections"]
+        report["fetch_errors"].extend(filter_result["fetch_errors"])
+        report["fetch_warnings"] = filter_result["fetch_warnings"]
+        validator_candidates = filter_result["validator_candidates"]
 
-        validated, validation = await self._validate_web(query, validator_candidates)
+        async def run_validation() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            return await self._validate_web(query, validator_candidates)
+
+        validated, validation = await (
+            trace.measure(
+                "06-web-validate",
+                {"query": query, "candidate_count": len(validator_candidates)},
+                run_validation,
+                output_builder=lambda result: {
+                    "accepted": self._chunk_details(result[0], include_content),
+                    "accepted_ranks": result[1].get("decision", {}).get("accepted_ranks", []),
+                    "rejected_ranks": result[1].get("decision", {}).get("rejected_ranks", []),
+                    **result[1],
+                },
+                usage_builder=lambda result: result[1].get("usage_metadata"),
+                run_type="llm" if validator_candidates else "chain",
+                metadata=self._ls_model_metadata("google_genai", self._setting("VALIDATION_MODEL"))
+                if validator_candidates
+                else None,
+            )
+            if trace
+            else run_validation()
+        )
         report["fetched_candidates"] = [
             {
                 key: value
@@ -790,6 +1046,7 @@ WEB EVIDENCE:\n{evidence}"""
                     "link": candidate["url"],
                     "source_type": "web_search",
                     "search_queries": candidate.get("queries", []),
+                    "content_source": candidate.get("content_source", "page"),
                 },
             }
             for candidate in validated
@@ -806,6 +1063,21 @@ WEB EVIDENCE:\n{evidence}"""
         last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
         if last_user is None:
             raise RuntimeError("No user message found")
+        original_query = str(last_user.get("content", ""))
+        if self._is_corporate_query(original_query):
+            downstream["messages"].insert(
+                0,
+                {
+                    "role": "system",
+                    "content": (
+                        "Pipe routing result: this request is an in-domain RDC Concrete corporate question. "
+                        "Treat RDC Concrete company, leadership, departments, offices, policies, and corporate "
+                        "information as in-domain. Do not use the generic out-of-domain refusal for this request. "
+                        "Answer only from the grounded evidence context; if it does not contain enough evidence, "
+                        "say that the answer could not be verified."
+                    ),
+                },
+            )
         evidence_instruction = {
             "none": "No validated web source was accepted. Do not say the answer came from web search and do not provide web citations.",
             "knowledge_base": "Clearly state that the answer is based on the Knowledge Base and cite the supporting Knowledge Base source IDs.",
@@ -948,17 +1220,17 @@ WEB EVIDENCE:\n{evidence}"""
                 }
             )
             include_content = bool(self._setting("TRACE_INCLUDE_CONTENT"))
-            domain_check = await self._domain_check(query)
-            await trace.step(
+            domain_check = await trace.measure(
                 "00-domain-check",
                 {
                     "query": query,
                     "prompt": DOMAIN_GATE_PROMPT if include_content else "<prompt omitted>",
                 },
-                domain_check,
+                lambda: self._domain_check(query),
+                output_builder=lambda result: result,
+                usage_builder=lambda result: result.get("usage_metadata"),
                 run_type="llm",
-                metadata=self._ls_model_metadata("google_genai", domain_check.get("model", self._setting("DOMAIN_CHECK_MODEL"))),
-                usage_metadata=domain_check.get("usage_metadata"),
+                metadata=self._ls_model_metadata("google_genai", self._setting("DOMAIN_CHECK_MODEL")),
             )
             try:
                 out_of_domain_threshold = float(self._setting("DOMAIN_OUT_OF_DOMAIN_THRESHOLD"))
@@ -992,14 +1264,14 @@ WEB EVIDENCE:\n{evidence}"""
                 await trace.step("10-finalize", {"query": query}, final_output)
                 yield self.OUT_OF_DOMAIN_MESSAGE
                 return
-            chunks, embedding_report = await self._retrieve(__request__, query)
-            await trace.step(
+            chunks, embedding_report = await trace.measure(
                 "01-retrieve",
                 {"query": query, "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID")},
-                {
-                    "chunk_count": len(chunks),
-                    "chunks": self._chunk_details(chunks, include_content),
-                    "embedding_usage": embedding_report,
+                lambda: self._retrieve(__request__, query),
+                output_builder=lambda result: {
+                    "chunk_count": len(result[0]),
+                    "chunks": self._chunk_details(result[0], include_content),
+                    "embedding_usage": result[1],
                 },
                 run_type="retriever",
             )
@@ -1024,32 +1296,44 @@ WEB EVIDENCE:\n{evidence}"""
                     "relevance_threshold": self._config_value(config, "RELEVANCE_THRESHOLD", None),
                 }
                 ranks = [c["rank"] for c in chunks]
-                await trace.step(
+                rerank_handle = await trace.begin_step(
                     "02-rerank",
                     {"input_ranks": ranks, **reranker_config},
-                    {
-                        "input_ranks": ranks,
-                        "output_ranks": ranks,
-                        "ordered_chunks": self._chunk_details(chunks, include_content),
-                        "reranker_config": reranker_config,
-                        "note": "query_collection returned this final order. Distances are retrieval return values; Open WebUI does not expose a separate reranker score here.",
-                    },
                 )
-                validated, validation = await self._validate(query, chunks)
+                rerank_output = {
+                    "input_ranks": ranks,
+                    "output_ranks": ranks,
+                    "ordered_chunks": self._chunk_details(chunks, include_content),
+                    "reranker_config": reranker_config,
+                    "timing_status": "snapshot",
+                    "note": "query_collection returned this final order. Distances are retrieval return values; Open WebUI does not expose a separate reranker score here.",
+                }
+                await trace.end_step(rerank_handle, rerank_output)
+                validated, validation = await trace.measure(
+                    "03-validate-kb",
+                    {"query": query, "chunks": self._chunk_details(chunks, include_content)},
+                    lambda: self._validate(query, chunks),
+                    output_builder=lambda result: {
+                        "accepted": self._chunk_details(result[0], include_content),
+                        "rejected_ranks": [c["rank"] for c in chunks if c not in result[0]],
+                        **result[1],
+                    },
+                    usage_builder=lambda result: result[1].get("usage_metadata"),
+                    run_type="llm",
+                    metadata=self._ls_model_metadata("google_genai", self._setting("VALIDATION_MODEL")),
+                )
             else:
                 await trace.step(
                     "02-rerank",
                     {"input_ranks": [], "skipped": True},
                     {"output_ranks": [], "skipped": True, "reason": "No Knowledge Base chunks retrieved."},
                 )
-            await trace.step(
-                "03-validate-kb",
-                {"query": query, "chunks": self._chunk_details(chunks, include_content)},
-                {"accepted": self._chunk_details(validated, include_content), "rejected_ranks": [c["rank"] for c in chunks if c not in validated], **validation},
-                run_type="llm" if chunks else "chain",
-                metadata=self._ls_model_metadata("google_genai", self._setting("VALIDATION_MODEL")) if chunks else None,
-                usage_metadata=validation.get("usage_metadata"),
-            )
+            if not chunks:
+                await trace.step(
+                    "03-validate-kb",
+                    {"query": query, "chunks": []},
+                    {"accepted": [], "rejected_ranks": [], **validation, "skipped": True, "reason": "No Knowledge Base chunks retrieved."},
+                )
 
             kb_sources = self._sources(validated)
             web_chunks: list[dict[str, Any]] = []
@@ -1061,41 +1345,10 @@ WEB EVIDENCE:\n{evidence}"""
                         from open_webui.models.users import UserModel
 
                         web_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
-                        web_chunks, web_report = await self._web_search(__request__, query, web_user, include_content)
+                        web_chunks, web_report = await self._web_search(
+                            __request__, query, web_user, include_content, trace=trace
+                        )
                         web_validation = web_report.get("validation", {})
-                        await trace.step(
-                            "04-web-search",
-                            {"query": query, "engine": web_report.get("engine"), "queries": web_report.get("queries", [])},
-                            {
-                                "enabled": True,
-                                "result_count": len(web_report.get("search_results", [])),
-                                "search_results": web_report.get("search_results", []),
-                                "errors": web_report.get("fetch_errors", []),
-                            },
-                        )
-                        await trace.step(
-                            "05-web-filter",
-                            {"candidate_count": len(web_report.get("search_results", []))},
-                            {
-                                "prefilter_rejections": web_report.get("prefilter_rejections", []),
-                                "fetched_candidates": web_report.get("fetched_candidates", []),
-                            },
-                        )
-                        await trace.step(
-                            "06-web-validate",
-                            {"query": query, "candidate_count": len(web_report.get("fetched_candidates", []))},
-                            {
-                                "accepted": self._chunk_details(web_chunks, include_content),
-                                "accepted_ranks": web_validation.get("decision", {}).get("accepted_ranks", []),
-                                "rejected_ranks": web_validation.get("decision", {}).get("rejected_ranks", []),
-                                **web_validation,
-                            },
-                            run_type="llm" if web_report.get("fetched_candidates") else "chain",
-                            metadata=self._ls_model_metadata("google_genai", self._setting("VALIDATION_MODEL"))
-                            if web_report.get("fetched_candidates")
-                            else None,
-                            usage_metadata=web_validation.get("usage_metadata"),
-                        )
                     except Exception as exc:
                         web_report = {
                             "enabled": True,
@@ -1103,21 +1356,9 @@ WEB EVIDENCE:\n{evidence}"""
                             "queries": self._web_queries(query),
                         }
                         await trace.step(
-                            "04-web-search",
+                            "web-fallback-error",
                             {"query": query, "queries": web_report["queries"]},
-                            {"enabled": True, "result_count": 0, "errors": [web_report["error"]]},
-                            error=type(exc).__name__,
-                        )
-                        await trace.step(
-                            "05-web-filter",
-                            {"candidate_count": 0},
-                            {"prefilter_rejections": [], "fetched_candidates": [], "reason": "Web search failed."},
-                            error=type(exc).__name__,
-                        )
-                        await trace.step(
-                            "06-web-validate",
-                            {"query": query, "candidate_count": 0},
-                            {"accepted": [], "reason": "Web search failed; no external evidence accepted."},
+                            {"enabled": True, "reason": "Web search failed; no external evidence accepted.", "error": web_report["error"]},
                             error=type(exc).__name__,
                         )
                 else:
@@ -1144,6 +1385,10 @@ WEB EVIDENCE:\n{evidence}"""
 
             evidence_chunks = web_chunks if web_chunks else validated
             evidence_origin = "web_search" if web_chunks else ("knowledge_base" if validated else "none")
+            context_handle = await trace.begin_step(
+                "07-build-context",
+                {"evidence_origin": evidence_origin, "validated_ranks": [c["rank"] for c in evidence_chunks]},
+            )
             if evidence_chunks:
                 context, included_ranks = self._context(evidence_chunks, int(self._setting("MAX_CONTEXT_CHARS")))
                 citation_chunks = [
@@ -1155,15 +1400,14 @@ WEB EVIDENCE:\n{evidence}"""
                 context = (
                     "<NO_RELEVANT_EVIDENCE>\n"
                     "No validated Knowledge Base evidence was found for this question.\n"
-                    f"Web search status: {'enabled but no validated IDS/Oracle result' if web_enabled else 'disabled by configuration'}.\n"
+                    f"Web search status: {'enabled but no validated result' if web_enabled else 'disabled by configuration'}.\n"
                     "</NO_RELEVANT_EVIDENCE>"
                 )
                 included_ranks = []
                 citation_chunks = []
             sources = self._sources(citation_chunks)
-            await trace.step(
-                "07-build-context",
-                {"evidence_origin": evidence_origin, "validated_ranks": [c["rank"] for c in evidence_chunks]},
+            await trace.end_step(
+                context_handle,
                 {
                     "included_ranks": included_ranks,
                     "evidence_origin": evidence_origin,
@@ -1176,50 +1420,81 @@ WEB EVIDENCE:\n{evidence}"""
             from open_webui.models.models import Models
             from open_webui.models.users import UserModel
 
-            user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
-            nova_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
-            system_prompt = None
-            if nova_model and nova_model.params:
-                system_prompt = nova_model.params.model_dump().get("system")
-            downstream_body = self._build_nova_body(body, context, evidence_origin)
-            effective_body = await self._effective_nova_request(downstream_body, nova_model, user)
-            await trace.step(
+            async def prepare_nova() -> tuple[Any, Any, Any, dict[str, Any], dict[str, Any]]:
+                prepared_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
+                prepared_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
+                prepared_system_prompt = None
+                if prepared_model and prepared_model.params:
+                    prepared_system_prompt = prepared_model.params.model_dump().get("system")
+                prepared_body = self._build_nova_body(body, context, evidence_origin)
+                prepared_effective_body = await self._effective_nova_request(
+                    prepared_body, prepared_model, prepared_user
+                )
+                return (
+                    prepared_user,
+                    prepared_model,
+                    prepared_system_prompt,
+                    prepared_body,
+                    prepared_effective_body,
+                )
+
+            user, nova_model, system_prompt, downstream_body, effective_body = await trace.measure(
                 "08-nova-input",
                 {"model": self._setting("NOVA_MODEL"), "evidence_origin": evidence_origin, "context": context if include_content else "<content omitted>"},
-                {
-                    "dispatcher_request": downstream_body if include_content else {"model": downstream_body["model"], "stream": True, "message_count": len(downstream_body.get("messages", []))},
-                    "effective_provider_request": effective_body if include_content else {"model": effective_body.get("model"), "stream": effective_body.get("stream"), "message_count": len(effective_body.get("messages", []))},
-                    "configured_system_prompt": system_prompt or "<not found in model preset>",
+                prepare_nova,
+                output_builder=lambda result: {
+                    "dispatcher_request": result[3] if include_content else {"model": result[3]["model"], "stream": True, "message_count": len(result[3].get("messages", []))},
+                    "effective_provider_request": result[4] if include_content else {"model": result[4].get("model"), "stream": result[4].get("stream"), "message_count": len(result[4].get("messages", []))},
+                    "configured_system_prompt": result[2] or "<not found in model preset>",
                     "system_prompt_applied_by": "Open WebUI internal dispatcher",
                     "evidence_origin": evidence_origin,
                     "web_search_report": web_report,
                     "note": "dispatcher_request is sent to Open WebUI; effective_provider_request shows the model-preset system prompt and parameters applied on the way to Nova.",
                 },
             )
-            events, nova_output, nova_raw_usage = await self._nova(__request__, downstream_body, user)
             nova_provider_model = str(effective_body.get("model") or self._setting("NOVA_MODEL"))
-            nova_usage_report = await self._nova_usage(
-                nova_raw_usage,
-                model=nova_provider_model,
-            )
-            await trace.step(
+            nova_usage_report: dict[str, Any] = {}
+
+            async def build_nova_output(result: tuple[list[Any], str, dict[str, Any]]) -> dict[str, Any]:
+                nonlocal nova_usage_report
+                nova_usage_report = await self._nova_usage(
+                    result[2],
+                    model=nova_provider_model,
+                )
+                return {
+                    "event_count": len(result[0]),
+                    "final_output": result[1],
+                    "raw_events": result[0] if include_content else ["<events omitted>"],
+                    **nova_usage_report,
+                }
+
+            events, nova_output, nova_raw_usage = await trace.measure(
                 "09-nova-output",
                 {"model": nova_provider_model},
-                {
-                    "event_count": len(events),
-                    "final_output": nova_output,
-                    "raw_events": events if include_content else ["<events omitted>"],
-                    **nova_usage_report,
-                },
+                lambda: self._nova(__request__, downstream_body, user),
+                output_builder=build_nova_output,
+                usage_builder=lambda result: nova_usage_report.get("usage_metadata"),
                 run_type="llm",
-                metadata=self._ls_model_metadata(str(self._setting("NOVA_PROVIDER") or "openwebui"), nova_provider_model),
-                usage_metadata=nova_usage_report.get("usage_metadata"),
+                metadata=self._ls_model_metadata(
+                    str(self._setting("NOVA_PROVIDER") or "openwebui"),
+                    nova_provider_model,
+                ),
             )
             # The internal dispatcher returns provider SSE frames. Do not
             # forward those frames through the Pipe protocol: Open WebUI's
             # outer stream handler would parse and serialize them a second
             # time, which can introduce broken Markdown/word boundaries.
             # Emit one clean assistant payload instead.
+            final_output = {
+                "status": "success",
+                "answer": nova_output,
+                "sources": sources,
+                "citation_count": len(sources),
+                "evidence_origin": evidence_origin,
+            }
+            finalize_handle = await trace.begin_step("10-finalize", {"answer": nova_output})
+            await trace.end_step(finalize_handle, final_output)
+
             if nova_output:
                 yield nova_output
 
@@ -1231,14 +1506,6 @@ WEB EVIDENCE:\n{evidence}"""
 
             if nova_raw_usage:
                 yield {"usage": nova_raw_usage}
-            final_output = {
-                "status": "success",
-                "answer": nova_output,
-                "sources": sources,
-                "citation_count": len(sources),
-                "evidence_origin": evidence_origin,
-            }
-            await trace.step("10-finalize", {"answer": nova_output}, final_output)
         except Exception as exc:
             final_output = {
                 "status": "error",
