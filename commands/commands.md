@@ -1,50 +1,43 @@
+# Open WebUI command index
 
+The verified WSL startup, troubleshooting, and Windows Playwright process is documented in [openwebui-wsl-visual-testing-runbook.md](openwebui-wsl-visual-testing-runbook.md).
 
-# Build the image
+## Docker image path
+
+```powershell
 docker build -t open-webui:local .
-
-# Remove any existing container with the same name (safe if none exists)
 docker rm -f open-webui
-
-# Run the container with your .env configuration
 docker run -d -p 3000:8080 -v open-webui:/app/backend/data --env-file docker.local.env --network nova-net --name open-webui --restart unless-stopped open-webui:local
+```
 
-# WSL Activating command
+## Native WSL development path
+
+Open WSL:
+
+```powershell
 wsl -d Ubuntu
-cd ~ && cd ~/projects/open-webui/
+```
 
+Frontend, in WSL terminal 2:
 
-//For running locally in wsl backend
-    bash run-dev.sh
+```bash
+cd ~/projects/open-webui
+nvm use 22
+npm run dev -- --port 5173
+```
 
+For the backend, use the environment-loading and Docker-hostname translation commands in the full runbook. Do not use the Docker hostname `nova-postgres` from native WSL.
 
-    ## Backend (WSL, native — first-time setup)
-    cd ~/projects/open-webui/backend
+Quick listener check:
 
-    # Create venv pinned to Python 3.11 (only needed once)
-    uv python install 3.11
-    uv venv --python 3.11
-    source .venv/bin/activate
-    uv pip install -r requirements.txt
+```bash
+pgrep -af 'uvicorn|vite'
+ss -ltnp | grep -E ':5173|:8080|:5432'
+```
 
-    cd ~/projects/open-webui/backend
-    bash run-dev.sh
+## Sync Windows source into WSL
 
-    ## Frontend
-    cd ~/projects/open-webui
-    nvm use 22          # only needed once per new shell if not set as default
-    npm ci
-
-    cd ~/projects/open-webui
-    npm run dev
-
-    # Terminal 1
-    cd ~/projects/open-webui/backend && bash run-dev.sh
-
-    # Terminal 2
-    cd ~/projects/open-webui && npm run dev
-
-//For resyncinging code into wsl
+```bash
 rsync -a --info=progress2 \
   --exclude='.git' \
   --exclude='node_modules' \
@@ -54,5 +47,7 @@ rsync -a --info=progress2 \
   --exclude='**/.venv' \
   --exclude='__pycache__' \
   --exclude='docker.local.env' \
-  "/mnt/d/My Projects/OpenWeb Ui/open-webui/" \
+  --exclude='.env.qa.local' \
+  "/mnt/d/My Projects/OpenWeb Ui/open-webui-test/open-webui/" \
   "$HOME/projects/open-webui/"
+```

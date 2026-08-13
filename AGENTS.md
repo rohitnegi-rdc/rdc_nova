@@ -10,3 +10,9 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## WSL development and visual QA
+
+Before starting Open WebUI locally, testing it through a browser, or troubleshooting its WSL development environment, read `commands/openwebui-wsl-visual-testing-runbook.md` completely and follow its Windows/WSL boundary.
+
+QA credentials are stored only in the ignored `.env.qa.local` file. Never print its contents, copy its password into tracked files, or expose it in command output. Load credentials only into the temporary browser-testing process and clear them after use.
