@@ -13,7 +13,6 @@ from typing import Optional, Union
 import bcrypt
 import jwt
 import pytz
-import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -90,32 +89,6 @@ def get_license_data(app, key):
                 setattr(app.state, 'WEBUI_NAME', v)
             elif k == 'metadata':
                 setattr(app.state, 'LICENSE_METADATA', v)
-
-    def handler(u):
-        res = requests.post(
-            f'{u}/api/v1/license/',
-            json={'key': key, 'version': '1'},
-            timeout=5,
-        )
-
-        if getattr(res, 'ok', False):
-            payload = getattr(res, 'json', lambda: {})()
-            data_handler(payload)
-            return True
-        else:
-            log.error(f'License: retrieval issue: {getattr(res, "text", "unknown error")}')
-
-    if key:
-        us = [
-            'https://api.openwebui.com',
-            'https://licenses.api.openwebui.com',
-        ]
-        try:
-            for u in us:
-                if handler(u):
-                    return True
-        except Exception as ex:
-            log.exception(f'License: Uncaught Exception: {ex}')
 
     try:
         if LICENSE_BLOB:
