@@ -773,10 +773,19 @@ async def agenerate_gemini_batch_embeddings(
         raise ImportError('The Gemini embedding engine requires the google-genai package') from exc
 
     client = genai.Client(api_key=key)
+    contents = texts
+    if model.rsplit('/', 1)[-1].startswith('gemini-embedding-2'):
+        # Gemini Embedding 2 treats a plain list of strings as parts of one
+        # multimodal input and returns one aggregated vector. Wrap every text
+        # as a separate Content so document chunks retain one vector each.
+        contents = [
+            types.Content(role='user', parts=[types.Part.from_text(text=text)])
+            for text in texts
+        ]
     result = await asyncio.to_thread(
         client.models.embed_content,
         model=model,
-        contents=texts,
+        contents=contents,
         config=types.EmbedContentConfig(output_dimensionality=int(output_dimensionality)),
     )
     embeddings = [list(embedding.values) for embedding in result.embeddings]
