@@ -456,6 +456,8 @@ class PipeStatusEventTests(unittest.IsolatedAsyncioTestCase):
 
         users_module = types.ModuleType("open_webui.models.users")
         users_module.UserModel = _UserModel
+        models_module = types.ModuleType("open_webui.models.models")
+        models_module.Models = _Models
         body = {
             "model": "nova_v2.nova_v2",
             "messages": [
@@ -467,7 +469,13 @@ class PipeStatusEventTests(unittest.IsolatedAsyncioTestCase):
             "stream": False,
         }
 
-        with patch.dict(sys.modules, {"open_webui.models.users": users_module}):
+        with patch.dict(
+            sys.modules,
+            {
+                "open_webui.models.models": models_module,
+                "open_webui.models.users": users_module,
+            },
+        ):
             output = [
                 item
                 async for item in self.pipe.pipe(

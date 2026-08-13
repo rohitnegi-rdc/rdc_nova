@@ -1,7 +1,7 @@
 """
 title: Nova V2
 author: RDC Concrete
-version: 2.0.0
+version: 2.2.0
 description: Grounded Knowledge Base Pipe with hierarchical LangSmith tracing.
 requirements: google-genai, langsmith
 """
@@ -245,6 +245,46 @@ class TraceSession:
 
 
 class Pipe:
+    PROVIDER_REQUEST_KEYS = frozenset(
+        {
+            "messages",
+            "stream",
+            "stream_options",
+            "temperature",
+            "top_p",
+            "min_p",
+            "max_tokens",
+            "max_completion_tokens",
+            "frequency_penalty",
+            "presence_penalty",
+            "reasoning_effort",
+            "seed",
+            "stop",
+            "logit_bias",
+            "response_format",
+            "n",
+            "user",
+            "service_tier",
+            "verbosity",
+        }
+    )
+    RAG_CONTROL_KEYS = frozenset(
+        {
+            "metadata",
+            "files",
+            "file_ids",
+            "knowledge",
+            "knowledge_ids",
+            "tool_ids",
+            "tools",
+            "features",
+            "filter_ids",
+            "folder_id",
+            "skill_ids",
+            "terminal_id",
+            "web_search",
+        }
+    )
     OUT_OF_DOMAIN_MESSAGE = (
         "I can only assist with RDC Concrete company, operations, batching, and ERP queries. "
         "For other assistance, please contact Admin support at 82918 91159 or 86570 49242."
@@ -314,6 +354,71 @@ class Pipe:
 
     def __init__(self):
         self.valves = self.Valves()
+
+    @staticmethod
+    async def _emit_status(
+        event_emitter: Any,
+        action: str,
+        description: str,
+        *,
+        done: bool = False,
+        hidden: bool = False,
+        **details: Any,
+    ) -> None:
+        """Emit a user-safe Open WebUI status without affecting the answer path."""
+        if not callable(event_emitter):
+            return
+
+        safe_details = {
+            key: value
+            for key, value in details.items()
+            if key in {"query", "count", "chunk_count", "source_count", "origin", "error"}
+        }
+        event = {
+            "type": "status",
+            "data": {
+                "action": action,
+                "description": description,
+                "done": done,
+                "hidden": hidden,
+                **safe_details,
+            },
+        }
+        try:
+            result = event_emitter(event)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            # A closed browser/socket must never break retrieval or generation.
+            return
+
+    @staticmethod
+    async def _replace_message_sources(
+        event_emitter: Any,
+        message_id: Optional[str],
+        sources: list[dict[str, Any]],
+    ) -> None:
+        """Replace sources already attached by native middleware with Pipe evidence."""
+        if not callable(event_emitter) or not message_id:
+            return
+        try:
+            result = event_emitter(
+                {
+                    "type": "chat:outlet",
+                    "data": {
+                        "messages": [
+                            {
+                                "id": message_id,
+                                "sources": sources,
+                            }
+                        ]
+                    },
+                }
+            )
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            return
 
     def pipes(self) -> list[dict[str, str]]:
         return [{"id": "nova_v2", "name": "Nova V2"}]
@@ -497,11 +602,32 @@ class Pipe:
             }
 
     @staticmethod
-    def _query(body: dict[str, Any]) -> str:
+    def _unwrap_user_query(content: str) -> str:
+        """Remove Open WebUI's native RAG wrapper while preserving ordinary input."""
+        stripped = content.strip()
+        is_native_rag_wrapper = (
+            stripped.startswith("### Task:")
+            and "Respond to the user query using the provided context" in stripped
+            and "<context>" in stripped
+            and "</context>" in stripped
+        )
+        if not is_native_rag_wrapper:
+            return content
+
+        query = stripped.rsplit("</context>", 1)[1].strip()
+        for prefix in ("### User Query:", "User Query:", "QUERY:"):
+            if query.startswith(prefix):
+                query = query[len(prefix) :].strip()
+                break
+        return query or content
+
+    @classmethod
+    def _query(cls, body: dict[str, Any]) -> str:
         for message in reversed(body.get("messages") or []):
             if message.get("role") == "user":
                 content = message.get("content", "")
-                return content if isinstance(content, str) else str(content)
+                content = content if isinstance(content, str) else str(content)
+                return cls._unwrap_user_query(content)
         return ""
 
     async def _retrieve(
@@ -571,6 +697,25 @@ class Pipe:
             }
             if include_content:
                 detail["content"] = chunk["text"]
+            details.append(detail)
+        return details
+
+    @staticmethod
+    def _web_candidate_details(
+        candidates: list[dict[str, Any]], include_content: bool = True
+    ) -> list[dict[str, Any]]:
+        """Serialize pre-validation web candidates without assuming KB chunk metadata."""
+        details: list[dict[str, Any]] = []
+        for candidate in candidates:
+            detail = {
+                "rank": candidate.get("rank"),
+                "title": candidate.get("title"),
+                "url": candidate.get("url"),
+                "queries": candidate.get("queries", []),
+                "content_source": candidate.get("content_source", "page"),
+            }
+            if include_content:
+                detail["content"] = candidate.get("content", "")
             details.append(detail)
         return details
 
@@ -837,6 +982,7 @@ WEB EVIDENCE:\n{evidence}"""
         user: Any,
         include_content: bool,
         trace: Optional[TraceSession] = None,
+        event_emitter: Any = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Search, filter/fetch, and validate web evidence with timed trace stages."""
         from open_webui.retrieval.web.utils import get_web_loader
@@ -871,6 +1017,11 @@ WEB EVIDENCE:\n{evidence}"""
                     candidates.append(self._web_result_dict(result, search_query))
             return {"candidates": candidates, "errors": errors}
 
+        await self._emit_status(
+            event_emitter,
+            "web_search",
+            "Searching the web",
+        )
         search_result = await (
             trace.measure(
                 "04-web-search",
@@ -974,6 +1125,11 @@ WEB EVIDENCE:\n{evidence}"""
                 "fetch_warnings": warnings,
             }
 
+        await self._emit_status(
+            event_emitter,
+            "web_filter",
+            "Reviewing web sources",
+        )
         filter_result = await (
             trace.measure(
                 "05-web-filter",
@@ -1004,13 +1160,18 @@ WEB EVIDENCE:\n{evidence}"""
         async def run_validation() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             return await self._validate_web(query, validator_candidates)
 
+        await self._emit_status(
+            event_emitter,
+            "web_validate",
+            "Validating web evidence",
+        )
         validated, validation = await (
             trace.measure(
                 "06-web-validate",
                 {"query": query, "candidate_count": len(validator_candidates)},
                 run_validation,
                 output_builder=lambda result: {
-                    "accepted": self._chunk_details(result[0], include_content),
+                    "accepted": self._web_candidate_details(result[0], include_content),
                     "accepted_ranks": result[1].get("decision", {}).get("accepted_ranks", []),
                     "rejected_ranks": result[1].get("decision", {}).get("rejected_ranks", []),
                     **result[1],
@@ -1063,7 +1224,7 @@ WEB EVIDENCE:\n{evidence}"""
         last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
         if last_user is None:
             raise RuntimeError("No user message found")
-        original_query = str(last_user.get("content", ""))
+        original_query = self._unwrap_user_query(str(last_user.get("content", "")))
         if self._is_corporate_query(original_query):
             downstream["messages"].insert(
                 0,
@@ -1084,7 +1245,7 @@ WEB EVIDENCE:\n{evidence}"""
             "web_search": "Clearly state that the answer uses web search and cite the supporting web source IDs.",
         }.get(evidence_origin, "Do not claim an evidence origin that is not present in the context.")
         last_user["content"] = (
-            f"{last_user.get('content', '')}\n\n"
+            f"{original_query}\n\n"
             "Grounded evidence context:\n"
             f"{context}\n\n"
             "Citation rules: cite factual claims supported by the context with inline numeric citations such as [1] or [2]. "
@@ -1100,24 +1261,39 @@ WEB EVIDENCE:\n{evidence}"""
         nova_model: Any,
         user: Any,
     ) -> dict[str, Any]:
-        """Reproduce the model-preset transformation for trace inspection only.
+        """Build the sanitized request sent to Nova's underlying provider model.
 
-        The returned copy is never sent. The real dispatcher applies the same
-        transformations immediately before calling the configured provider.
+        Nova is a workspace preset. Its system prompt and generation parameters
+        are retained, while model knowledge, tools, files, and web controls are
+        deliberately excluded so this Pipe remains the only RAG owner.
         """
-        effective = copy.deepcopy(body)
         if not nova_model:
-            return effective
+            raise RuntimeError(f"Nova model preset '{self._setting('NOVA_MODEL')}' was not found")
+
+        preset_id = str(getattr(nova_model, "id", None) or self._setting("NOVA_MODEL"))
+        base_model_id = str(getattr(nova_model, "base_model_id", None) or "").strip()
+        if not base_model_id or base_model_id == preset_id:
+            raise RuntimeError(f"Nova model preset '{preset_id}' does not have a valid base model")
 
         from open_webui.utils.payload import apply_model_params_to_body_openai, apply_system_prompt_to_body
 
-        params = nova_model.params.model_dump()
+        metadata = copy.deepcopy(body.get("metadata"))
+        effective = {
+            key: copy.deepcopy(value)
+            for key, value in body.items()
+            if key in self.PROVIDER_REQUEST_KEYS and value is not None
+        }
+        effective.setdefault("messages", [])
+        effective["stream"] = True
+        effective.setdefault("stream_options", {"include_usage": True})
+
+        params = nova_model.params.model_dump() if getattr(nova_model, "params", None) else {}
         system = params.pop("system", None)
         effective = apply_model_params_to_body_openai(params, effective)
-        effective = await apply_system_prompt_to_body(system, effective, effective.get("metadata"), user)
-        if nova_model.base_model_id:
-            effective["model"] = nova_model.base_model_id
-        effective.pop("metadata", None)
+        effective = await apply_system_prompt_to_body(system, effective, metadata, user)
+        for key in self.RAG_CONTROL_KEYS:
+            effective.pop(key, None)
+        effective["model"] = base_model_id
         return effective
 
     @staticmethod
@@ -1168,10 +1344,15 @@ WEB EVIDENCE:\n{evidence}"""
         }
 
     async def _nova(self, request: Any, downstream: dict[str, Any], user: Any) -> tuple[list[Any], str, dict[str, Any]]:
-        """Call Open WebUI's dispatcher and capture the complete streamed Nova output."""
+        """Call Nova's resolved provider model without reapplying preset behavior."""
         from open_webui.utils.chat import generate_chat_completion
 
-        response = await generate_chat_completion(request, downstream, user)
+        response = await generate_chat_completion(
+            request,
+            downstream,
+            user,
+            bypass_system_prompt=True,
+        )
         events: list[Any] = []
         text_parts: list[str] = []
         usage: dict[str, Any] = {}
@@ -1191,12 +1372,53 @@ WEB EVIDENCE:\n{evidence}"""
         body: dict[str, Any],
         __user__: Optional[dict[str, Any]] = None,
         __request__: Any = None,
+        __event_emitter__: Any = None,
+        __task__: Optional[str] = None,
+        __message_id__: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
+        if __task__:
+            if __request__ is None:
+                raise RuntimeError("Open WebUI task dispatch requires a request context")
+
+            # Title, tag, emoji, and follow-up generation prompts are Open WebUI
+            # control tasks, not user questions. Sending them through domain/RAG
+            # can leak the control prompt into retrieval or web search. Delegate
+            # them directly to Nova and let the outer task endpoint consume the
+            # clean text result.
+            from open_webui.models.models import Models
+            from open_webui.models.users import UserModel
+
+            task_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
+            task_body = copy.deepcopy(body)
+            task_body["model"] = self._setting("NOVA_MODEL")
+            task_body["stream"] = True
+            task_body.setdefault("stream_options", {"include_usage": True})
+            task_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
+            task_provider_body = await self._effective_nova_request(task_body, task_model, task_user)
+            _, task_output, _ = await self._nova(__request__, task_provider_body, task_user)
+            if task_output:
+                yield task_output
+            return
+
         query = self._query(body)
         if not query:
+            await self._emit_status(
+                __event_emitter__,
+                "missing_input",
+                "No user question was provided",
+                done=True,
+                error=True,
+            )
             yield "No user question was provided."
             return
         if __request__ is None:
+            await self._emit_status(
+                __event_emitter__,
+                "error",
+                "The request context is unavailable",
+                done=True,
+                error=True,
+            )
             yield "The Pipe requires an Open WebUI request context for native retrieval and citations."
             return
 
@@ -1213,6 +1435,7 @@ WEB EVIDENCE:\n{evidence}"""
                     "query": query,
                     "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID"),
                     "nova_model": self._setting("NOVA_MODEL"),
+                    "rag_owner": "pipe",
                     "web_search_enabled": web_enabled,
                     "domain_check_enabled": bool(self._setting("ENABLE_DOMAIN_CHECK")),
                     "domain_check_model": self._setting("DOMAIN_CHECK_MODEL"),
@@ -1220,6 +1443,11 @@ WEB EVIDENCE:\n{evidence}"""
                 }
             )
             include_content = bool(self._setting("TRACE_INCLUDE_CONTENT"))
+            await self._emit_status(
+                __event_emitter__,
+                "domain_check",
+                "Checking request domain",
+            )
             domain_check = await trace.measure(
                 "00-domain-check",
                 {
@@ -1262,18 +1490,46 @@ WEB EVIDENCE:\n{evidence}"""
                     "domain_check": domain_check,
                 }
                 await trace.step("10-finalize", {"query": query}, final_output)
+                await self._replace_message_sources(
+                    __event_emitter__,
+                    __message_id__,
+                    [],
+                )
+                await self._emit_status(
+                    __event_emitter__,
+                    "out_of_domain",
+                    "Request is outside Nova's supported domain",
+                    done=True,
+                )
                 yield self.OUT_OF_DOMAIN_MESSAGE
                 return
+            await self._emit_status(
+                __event_emitter__,
+                "knowledge_search",
+                "Searching the Knowledge Base",
+                query=query,
+            )
             chunks, embedding_report = await trace.measure(
                 "01-retrieve",
                 {"query": query, "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID")},
                 lambda: self._retrieve(__request__, query),
                 output_builder=lambda result: {
                     "chunk_count": len(result[0]),
+                    "retrieval_call_count": 1,
+                    "rag_owner": "pipe",
                     "chunks": self._chunk_details(result[0], include_content),
                     "embedding_usage": result[1],
                 },
                 run_type="retriever",
+            )
+            retrieved_sources = self._sources(chunks)
+            await self._emit_status(
+                __event_emitter__,
+                "sources_retrieved",
+                "Knowledge Base retrieval completed",
+                count=len(retrieved_sources),
+                source_count=len(retrieved_sources),
+                chunk_count=len(chunks),
             )
 
             validated: list[dict[str, Any]] = []
@@ -1309,6 +1565,13 @@ WEB EVIDENCE:\n{evidence}"""
                     "note": "query_collection returned this final order. Distances are retrieval return values; Open WebUI does not expose a separate reranker score here.",
                 }
                 await trace.end_step(rerank_handle, rerank_output)
+                await self._emit_status(
+                    __event_emitter__,
+                    "validate_kb",
+                    "Validating Knowledge Base evidence",
+                    chunk_count=len(chunks),
+                    source_count=len(retrieved_sources),
+                )
                 validated, validation = await trace.measure(
                     "03-validate-kb",
                     {"query": query, "chunks": self._chunk_details(chunks, include_content)},
@@ -1346,7 +1609,12 @@ WEB EVIDENCE:\n{evidence}"""
 
                         web_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
                         web_chunks, web_report = await self._web_search(
-                            __request__, query, web_user, include_content, trace=trace
+                            __request__,
+                            query,
+                            web_user,
+                            include_content,
+                            trace=trace,
+                            event_emitter=__event_emitter__,
                         )
                         web_validation = web_report.get("validation", {})
                     except Exception as exc:
@@ -1385,6 +1653,12 @@ WEB EVIDENCE:\n{evidence}"""
 
             evidence_chunks = web_chunks if web_chunks else validated
             evidence_origin = "web_search" if web_chunks else ("knowledge_base" if validated else "none")
+            await self._emit_status(
+                __event_emitter__,
+                "build_context",
+                "Preparing grounded context",
+                origin=evidence_origin,
+            )
             context_handle = await trace.begin_step(
                 "07-build-context",
                 {"evidence_origin": evidence_origin, "validated_ranks": [c["rank"] for c in evidence_chunks]},
@@ -1443,13 +1717,17 @@ WEB EVIDENCE:\n{evidence}"""
                 {"model": self._setting("NOVA_MODEL"), "evidence_origin": evidence_origin, "context": context if include_content else "<content omitted>"},
                 prepare_nova,
                 output_builder=lambda result: {
-                    "dispatcher_request": result[3] if include_content else {"model": result[3]["model"], "stream": True, "message_count": len(result[3].get("messages", []))},
+                    "nova_preset_id": self._setting("NOVA_MODEL"),
+                    "resolved_base_model_id": result[4].get("model"),
+                    "rag_owner": "pipe",
+                    "native_rag_controls_forwarded": False,
+                    "preset_request": result[3] if include_content else {"model": result[3]["model"], "stream": True, "message_count": len(result[3].get("messages", []))},
                     "effective_provider_request": result[4] if include_content else {"model": result[4].get("model"), "stream": result[4].get("stream"), "message_count": len(result[4].get("messages", []))},
                     "configured_system_prompt": result[2] or "<not found in model preset>",
-                    "system_prompt_applied_by": "Open WebUI internal dispatcher",
+                    "system_prompt_applied_by": "Nova V2 Pipe",
                     "evidence_origin": evidence_origin,
                     "web_search_report": web_report,
-                    "note": "dispatcher_request is sent to Open WebUI; effective_provider_request shows the model-preset system prompt and parameters applied on the way to Nova.",
+                    "note": "The effective provider request is sent directly to Nova's base model. Model knowledge, files, tools, and web controls are excluded.",
                 },
             )
             nova_provider_model = str(effective_body.get("model") or self._setting("NOVA_MODEL"))
@@ -1468,10 +1746,21 @@ WEB EVIDENCE:\n{evidence}"""
                     **nova_usage_report,
                 }
 
+            await self._emit_status(
+                __event_emitter__,
+                "nova_generate",
+                "Nova is generating the answer",
+                origin=evidence_origin,
+                source_count=len(sources),
+            )
             events, nova_output, nova_raw_usage = await trace.measure(
                 "09-nova-output",
-                {"model": nova_provider_model},
-                lambda: self._nova(__request__, downstream_body, user),
+                {
+                    "model": nova_provider_model,
+                    "nova_preset_id": self._setting("NOVA_MODEL"),
+                    "rag_owner": "pipe",
+                },
+                lambda: self._nova(__request__, effective_body, user),
                 output_builder=build_nova_output,
                 usage_builder=lambda result: nova_usage_report.get("usage_metadata"),
                 run_type="llm",
@@ -1491,6 +1780,10 @@ WEB EVIDENCE:\n{evidence}"""
                 "sources": sources,
                 "citation_count": len(sources),
                 "evidence_origin": evidence_origin,
+                "nova_preset_id": self._setting("NOVA_MODEL"),
+                "resolved_base_model_id": nova_provider_model,
+                "rag_owner": "pipe",
+                "retrieval_call_count": 1,
             }
             finalize_handle = await trace.begin_step("10-finalize", {"answer": nova_output})
             await trace.end_step(finalize_handle, final_output)
@@ -1506,6 +1799,21 @@ WEB EVIDENCE:\n{evidence}"""
 
             if nova_raw_usage:
                 yield {"usage": nova_raw_usage}
+
+            await self._replace_message_sources(
+                __event_emitter__,
+                __message_id__,
+                sources,
+            )
+
+            await self._emit_status(
+                __event_emitter__,
+                "complete",
+                "Answer completed",
+                done=True,
+                origin=evidence_origin,
+                source_count=len(sources),
+            )
         except Exception as exc:
             final_output = {
                 "status": "error",
@@ -1513,6 +1821,18 @@ WEB EVIDENCE:\n{evidence}"""
                 "error": str(exc),
             }
             await trace.step("error", {"query": query}, final_output, error=type(exc).__name__)
+            await self._replace_message_sources(
+                __event_emitter__,
+                __message_id__,
+                [],
+            )
+            await self._emit_status(
+                __event_emitter__,
+                "error",
+                "Unable to complete the request",
+                done=True,
+                error=True,
+            )
             yield f"The Knowledge Base Pipe could not complete this request: {type(exc).__name__}."
         finally:
             await trace.finish(final_output)
