@@ -311,3 +311,13 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+
+# Local agent tooling and generated QA/analysis artifacts
+.claude/
+.codex/
+artifacts/
+graphify-out/
+**/graphify-out/
+
+# Local Open WebUI data backups
+openwebui-backup-*/
