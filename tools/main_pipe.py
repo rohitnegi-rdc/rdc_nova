@@ -1,7 +1,7 @@
 """
 title: Nova V2
 author: RDC Concrete
-version: 2.2.0
+version: 2.2.1
 description: Grounded Knowledge Base Pipe with hierarchical LangSmith tracing.
 requirements: google-genai, langsmith
 """
@@ -354,6 +354,9 @@ class Pipe:
 
     def __init__(self):
         self.valves = self.Valves()
+        self._gemini_client_instance: Any = None
+        self._gemini_client_api_key = ""
+        self._gemini_client_lock = asyncio.Lock()
 
     @staticmethod
     async def _emit_status(
@@ -434,6 +437,35 @@ class Pipe:
         if not key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
         return key
+
+    async def _get_gemini_client(self) -> Any:
+        """Reuse one GenAI client and its HTTP pool until the API key changes."""
+        api_key = self._api_key()
+        if self._gemini_client_instance is not None and self._gemini_client_api_key == api_key:
+            return self._gemini_client_instance
+
+        async with self._gemini_client_lock:
+            if self._gemini_client_instance is not None and self._gemini_client_api_key == api_key:
+                return self._gemini_client_instance
+
+            from google import genai
+
+            next_client = genai.Client(api_key=api_key)
+            previous_client = self._gemini_client_instance
+            self._gemini_client_instance = next_client
+            self._gemini_client_api_key = api_key
+
+            if previous_client is not None:
+                try:
+                    await previous_client.aio.aclose()
+                except Exception:
+                    pass
+                try:
+                    previous_client.close()
+                except Exception:
+                    pass
+
+            return next_client
 
     @staticmethod
     def _ls_model_metadata(provider: str, model: str) -> dict[str, str]:
@@ -545,9 +577,7 @@ class Pipe:
             }
 
         try:
-            from google import genai
-
-            client = genai.Client(api_key=self._api_key())
+            client = await self._get_gemini_client()
             model = self._setting("DOMAIN_CHECK_MODEL") or self._setting("VALIDATION_MODEL")
             prompt = f"{DOMAIN_GATE_PROMPT}\n\nUSER QUESTION:\n{query}"
             response = await client.aio.models.generate_content(
@@ -776,8 +806,6 @@ class Pipe:
         chunks: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Use Gemini as a transparent evidence validator; preserve raw decision for tracing."""
-        from google import genai
-
         evidence = "\n\n".join(f"RANK {c['rank']}: {c['text']}" for c in chunks)
         prompt = f"""You are an evidence validation step for a RAG system.
 Return JSON only with this schema: {{\"accepted_ranks\": [1], \"rejected_ranks\": [], \"reason\": \"...\"}}.
@@ -785,7 +813,7 @@ Accept a chunk only if it directly helps answer the question. Do not answer the 
 
 QUESTION: {query}
 EVIDENCE:\n{evidence}"""
-        client = genai.Client(api_key=self._api_key())
+        client = await self._get_gemini_client()
         response = await client.aio.models.generate_content(
             model=self._setting("VALIDATION_MODEL"),
             contents=prompt,
@@ -953,9 +981,7 @@ Do not answer the question.
 
 QUESTION: {query}
 WEB EVIDENCE:\n{evidence}"""
-        from google import genai
-
-        client = genai.Client(api_key=self._api_key())
+        client = await self._get_gemini_client()
         response = await client.aio.models.generate_content(
             model=self._setting("VALIDATION_MODEL"),
             contents=prompt,
