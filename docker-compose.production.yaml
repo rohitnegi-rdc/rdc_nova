@@ -1,0 +1,74 @@
+name: rdc-nova
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rdc-nova-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-6020}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend
+
+  open-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_HASH: ${BUILD_HASH:-manual-production}
+        USE_SLIM: ${USE_SLIM:-true}
+        UID: ${APP_UID:-1000}
+        GID: ${APP_GID:-1000}
+    image: rdc-nova:${IMAGE_TAG:-manual}
+    container_name: rdc-nova
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${OPEN_WEBUI_ENV_FILE:-.env.production}
+    environment:
+      DATABASE_TYPE: postgresql
+      DATABASE_USER: ${POSTGRES_USER}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ${POSTGRES_DB}
+      ENABLE_OLLAMA_API: "false"
+    ports:
+      - "${OPEN_WEBUI_BIND_ADDRESS:-0.0.0.0}:${OPEN_WEBUI_PORT:-6010}:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail http://localhost:8080/health | jq -e '.status == true' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+    name: rdc-nova-postgres-data
+  openwebui_data:
+    name: rdc-nova-openwebui-data
+
+networks:
+  backend:
+    name: rdc-nova-backend
