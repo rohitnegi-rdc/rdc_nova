@@ -403,6 +403,40 @@ class PipeStatusEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.events[-1]["data"]["done"])
         self.assertEqual(output, [self.pipe.OUT_OF_DOMAIN_MESSAGE])
 
+    async def test_greeting_only_returns_llm_response_before_retrieval(self):
+        greeting = (
+            "Hello! 👋 I’m Nova, your RDC Concrete support assistant. "
+            "How can I help you today?"
+        )
+        output = await self._run(
+            domain={
+                "decision": "greeting_only",
+                "confidence": 0.99,
+                "greeting_response": greeting,
+            },
+            retrieved=[],
+            query="Hello",
+        )
+
+        self.assertEqual(self._actions(), ["domain_check", "greeting"])
+        self.assertTrue(self.events[-1]["data"]["done"])
+        self.assertEqual(self.retrieve_calls, 0)
+        self.assertEqual(output, [greeting])
+        self.assertFalse(any(isinstance(item, dict) for item in output))
+
+    async def test_greeting_with_question_continues_through_rag(self):
+        chunk = _chunk()
+        output = await self._run(
+            domain={"decision": "in_domain", "confidence": 0.99},
+            retrieved=[chunk],
+            query="Hello, why is my IDS ticket not showing?",
+        )
+
+        self.assertEqual(self.retrieve_calls, 1)
+        self.assertIn("Grounded answer [1]", output)
+        self.assertIn("knowledge_search", self._actions())
+        self.assertNotIn("greeting", self._actions())
+
     async def test_error_closes_progress_without_exposing_exception(self):
         output = await self._run(
             domain={"decision": "in_domain", "confidence": 0.99},

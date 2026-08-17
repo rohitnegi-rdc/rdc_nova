@@ -25,6 +25,13 @@ class _FakeModels:
         )
         if "evidence validation step" in contents:
             text = '{"accepted_ranks":[1],"rejected_ranks":[],"reason":"relevant"}'
+        elif contents.rstrip().endswith("USER QUESTION:\nHello"):
+            text = (
+                '{"decision":"greeting_only","confidence":0.99,'
+                '"domain_area":"none","matched_terms":[],"reason":"Pure greeting",'
+                '"greeting_response":"Hello! I’m Nova, your RDC Concrete support assistant. '
+                'How can I help you today?"}'
+            )
         else:
             text = (
                 '{"decision":"in_domain","confidence":0.99,'
@@ -84,6 +91,22 @@ def _chunk():
 
 
 class GeminiClientReuseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_domain_check_preserves_llm_generated_greeting(self):
+        factory = _ClientFactory()
+        pipe = main_pipe.Pipe()
+
+        with (
+            patch.dict(os.environ, {"GEMINI_API_KEY": "key-a"}),
+            patch.dict(sys.modules, _google_modules(factory)),
+        ):
+            domain = await pipe._domain_check("Hello")
+
+        self.assertEqual(domain["decision"], "greeting_only")
+        self.assertEqual(
+            domain["greeting_response"],
+            "Hello! I’m Nova, your RDC Concrete support assistant. How can I help you today?",
+        )
+
     async def test_domain_and_validation_share_one_client(self):
         factory = _ClientFactory()
         pipe = main_pipe.Pipe()
