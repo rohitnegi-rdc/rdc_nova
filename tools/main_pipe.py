@@ -1,7 +1,7 @@
 """
 title: Nova V2
 author: RDC Concrete
-version: 2.2.1
+version: 2.3.0
 description: Grounded Knowledge Base Pipe with hierarchical LangSmith tracing.
 requirements: google-genai, langsmith
 """
@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 DOMAIN_GATE_PROMPT = """You are the domain gate for Nova, the internal support assistant for RDC Concrete.
 
 Classify the user's latest question as exactly one of:
+- greeting_only: the complete message is only a social greeting with no question,
+  request, task or substantive topic
 - in_domain: clearly about the supported RDC/RMC/IDS/Oracle operational domain
 - ambiguous: possibly related to the supported domain, but too short or underspecified
 - out_of_domain: clearly unrelated to the supported domain
@@ -59,6 +61,15 @@ The supported domain includes:
    evidence; do not infer private or current corporate facts.
 
 Decision rules:
+- Use greeting_only only when the entire user message is a greeting or pleasantry,
+  such as hi, hello, hey, good morning, good afternoon, good evening or namaste.
+  If the message also contains any question, request, problem, topic or instruction,
+  it is not greeting_only; classify the substantive content normally.
+- For greeting_only, write a natural, professional response of at most two short
+  sentences in greeting_response. Introduce yourself as Nova, RDC Concrete's
+  support assistant, and ask how you can help. Do not include factual claims,
+  citations, support solutions or an evidence-source label.
+- For every other decision, greeting_response must be an empty string.
 - A question is in_domain when it clearly concerns any supported area, even if it
   does not contain RMC, RDC, IDS or Oracle.
 - A domain term plus an operational action or symptom is normally in_domain. For
@@ -74,10 +85,11 @@ Decision rules:
   tied to RDC Concrete remain out_of_domain.
 - Mark out_of_domain only when the question is clearly unrelated to all supported
   areas and has no plausible RDC/RMC/IDS/Oracle operational interpretation.
-- Do not answer, solve, browse, retrieve or cite anything in this step.
+- Except for greeting_response when the decision is greeting_only, do not answer,
+  solve, browse, retrieve or cite anything in this step.
 
 Return JSON only:
-{"decision":"in_domain|ambiguous|out_of_domain","confidence":0.0,"domain_area":"rmc_product|raw_materials|batching|ids_edge|oracle_erp|corporate|rdc|none|unclear","matched_terms":[],"reason":"short explanation"}
+{"decision":"greeting_only|in_domain|ambiguous|out_of_domain","confidence":0.0,"domain_area":"rmc_product|raw_materials|batching|ids_edge|oracle_erp|corporate|rdc|none|unclear","matched_terms":[],"reason":"short explanation","greeting_response":"generated greeting or empty string"}
 
 Confidence is confidence in the classification, not confidence that the Knowledge
 Base contains the answer. Low-confidence or malformed output must be treated as
@@ -350,6 +362,12 @@ class Pipe:
             default=0.90,
             description="Confidence required to stop an obviously out-of-domain request.",
         )
+        GREETING_CONFIDENCE_THRESHOLD: float = Field(
+            default=0.90,
+            ge=0.0,
+            le=1.0,
+            description="Confidence required to return an LLM-generated greeting without RAG.",
+        )
         NOVA_PROVIDER: str = Field(default="google_genai", description="Provider label used in cost traces.")
 
     def __init__(self):
@@ -589,7 +607,7 @@ class Pipe:
             usage_report = self._gemini_usage(response, model=model)
             decision = json.loads(raw)
             label = str(decision.get("decision", "ambiguous")).lower()
-            if label not in {"in_domain", "ambiguous", "out_of_domain"}:
+            if label not in {"greeting_only", "in_domain", "ambiguous", "out_of_domain"}:
                 label = "ambiguous"
             try:
                 confidence = float(decision.get("confidence", 0.0))
@@ -599,12 +617,16 @@ class Pipe:
             matched_terms = decision.get("matched_terms")
             if not isinstance(matched_terms, list):
                 matched_terms = []
+            greeting_response = str(decision.get("greeting_response") or "").strip()
+            if label == "greeting_only" and not greeting_response:
+                label = "ambiguous"
             report = {
                 "decision": label,
                 "confidence": confidence,
                 "domain_area": decision.get("domain_area", "unclear"),
                 "matched_terms": matched_terms,
                 "reason": decision.get("reason", ""),
+                "greeting_response": greeting_response[:500] if label == "greeting_only" else "",
                 "raw_response": raw,
                 "enabled": True,
                 "model": model,
@@ -1490,6 +1512,51 @@ WEB EVIDENCE:\n{evidence}"""
                 out_of_domain_threshold = float(self._setting("DOMAIN_OUT_OF_DOMAIN_THRESHOLD"))
             except (TypeError, ValueError):
                 out_of_domain_threshold = 0.90
+            try:
+                greeting_threshold = float(self._setting("GREETING_CONFIDENCE_THRESHOLD"))
+            except (TypeError, ValueError):
+                greeting_threshold = 0.90
+            greeting_response = str(domain_check.get("greeting_response") or "").strip()
+            if (
+                domain_check.get("decision") == "greeting_only"
+                and float(domain_check.get("confidence", 0.0)) >= greeting_threshold
+                and greeting_response
+            ):
+                skip_reason = "Greeting-only request; Knowledge Base, web search, and Nova generation bypassed."
+                for name in (
+                    "01-retrieve",
+                    "02-rerank",
+                    "03-validate-kb",
+                    "04-web-search",
+                    "05-web-filter",
+                    "06-web-validate",
+                    "07-build-context",
+                    "08-nova-input",
+                    "09-nova-output",
+                ):
+                    await trace.step(name, {"query": query}, {"skipped": True, "reason": skip_reason})
+                final_output = {
+                    "status": "greeting_only",
+                    "answer": greeting_response,
+                    "sources": [],
+                    "citation_count": 0,
+                    "evidence_origin": "none",
+                    "domain_check": domain_check,
+                }
+                await trace.step("10-finalize", {"query": query}, final_output)
+                await self._replace_message_sources(
+                    __event_emitter__,
+                    __message_id__,
+                    [],
+                )
+                await self._emit_status(
+                    __event_emitter__,
+                    "greeting",
+                    "Nova responded to the greeting",
+                    done=True,
+                )
+                yield greeting_response
+                return
             if (
                 domain_check.get("decision") == "out_of_domain"
                 and float(domain_check.get("confidence", 0.0)) >= out_of_domain_threshold
