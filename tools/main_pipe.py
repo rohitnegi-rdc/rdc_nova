@@ -9,16 +9,16 @@ requirements: google-genai, langsmith
 import asyncio
 import copy
 import inspect
-import re
 import json
 import os
+import re
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
-
 
 DOMAIN_GATE_PROMPT = """You are the domain gate for Nova, the internal support assistant for RDC Concrete.
 
@@ -254,6 +254,51 @@ class TraceSession:
             await asyncio.to_thread(self.root.patch)
         except Exception:
             return
+
+
+@dataclass
+class _PipeRunState:
+    """Mutable completion state shared with the trace-finalization path."""
+
+    final_output: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _EvidenceResult:
+    """Evidence selected for Nova after Knowledge Base and optional web checks."""
+
+    chunks: list[dict[str, Any]]
+    origin: str
+    web_report: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _EvidenceContext:
+    """Bounded context and the matching Open WebUI citation sources."""
+
+    text: str
+    sources: list[dict[str, Any]]
+    included_ranks: list[int]
+
+
+@dataclass(frozen=True)
+class _PreparedNova:
+    """Nova preset data resolved to the provider request sent downstream."""
+
+    user: Any
+    model: Any
+    system_prompt: Optional[str]
+    preset_body: dict[str, Any]
+    provider_body: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _NovaAnswer:
+    """Clean Nova answer plus provider usage needed by the Pipe protocol."""
+
+    text: str
+    raw_usage: dict[str, Any]
+    provider_model: str
 
 
 class Pipe:
@@ -1415,6 +1460,722 @@ WEB EVIDENCE:\n{evidence}"""
             text_parts.append(str(response))
         return events, "".join(text_parts), usage
 
+    async def _handle_task(
+        self,
+        body: dict[str, Any],
+        user: Any,
+        request: Any,
+        task: Optional[str],
+    ) -> Optional[str]:
+        """Send Open WebUI control tasks directly to Nova, outside the RAG flow."""
+        if not task:
+            return None
+        if request is None:
+            raise RuntimeError("Open WebUI task dispatch requires a request context")
+
+        from open_webui.models.models import Models
+        from open_webui.models.users import UserModel
+
+        task_user = UserModel.model_validate(user) if isinstance(user, dict) else user
+        task_body = copy.deepcopy(body)
+        task_body["model"] = self._setting("NOVA_MODEL")
+        task_body["stream"] = True
+        task_body.setdefault("stream_options", {"include_usage": True})
+        task_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
+        provider_body = await self._effective_nova_request(
+            task_body,
+            task_model,
+            task_user,
+        )
+        _, task_output, _ = await self._nova(request, provider_body, task_user)
+        return task_output or None
+
+    async def _start_trace(
+        self,
+        trace: TraceSession,
+        query: str,
+    ) -> tuple[bool, bool]:
+        """Start the parent LangSmith run and return request-level feature flags."""
+        web_enabled = bool(self._setting("ENABLE_WEB_SEARCH"))
+        include_content = bool(self._setting("TRACE_INCLUDE_CONTENT"))
+        await trace.start(
+            {
+                "query": query,
+                "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID"),
+                "nova_model": self._setting("NOVA_MODEL"),
+                "rag_owner": "pipe",
+                "web_search_enabled": web_enabled,
+                "domain_check_enabled": bool(self._setting("ENABLE_DOMAIN_CHECK")),
+                "domain_check_model": self._setting("DOMAIN_CHECK_MODEL"),
+                "cost_tracking": "langsmith_provider_usage_and_pricing",
+            }
+        )
+        return web_enabled, include_content
+
+    async def _run_domain_check(
+        self,
+        trace: TraceSession,
+        query: str,
+        include_content: bool,
+        event_emitter: Any,
+    ) -> dict[str, Any]:
+        """Classify the query and expose the complete decision in LangSmith."""
+        await self._emit_status(
+            event_emitter,
+            "domain_check",
+            "Checking request domain",
+        )
+        return await trace.measure(
+            "00-domain-check",
+            {
+                "query": query,
+                "prompt": DOMAIN_GATE_PROMPT if include_content else "<prompt omitted>",
+            },
+            lambda: self._domain_check(query),
+            output_builder=lambda result: result,
+            usage_builder=lambda result: result.get("usage_metadata"),
+            run_type="llm",
+            metadata=self._ls_model_metadata(
+                "google_genai",
+                self._setting("DOMAIN_CHECK_MODEL"),
+            ),
+        )
+
+    async def _handle_domain_result(
+        self,
+        trace: TraceSession,
+        state: _PipeRunState,
+        query: str,
+        domain_check: dict[str, Any],
+        event_emitter: Any,
+        message_id: Optional[str],
+    ) -> Optional[str]:
+        """Finish greeting-only or out-of-domain requests before retrieval."""
+        try:
+            out_of_domain_threshold = float(
+                self._setting("DOMAIN_OUT_OF_DOMAIN_THRESHOLD")
+            )
+        except (TypeError, ValueError):
+            out_of_domain_threshold = 0.90
+        try:
+            greeting_threshold = float(
+                self._setting("GREETING_CONFIDENCE_THRESHOLD")
+            )
+        except (TypeError, ValueError):
+            greeting_threshold = 0.90
+
+        decision = domain_check.get("decision")
+        confidence = float(domain_check.get("confidence", 0.0))
+        greeting_response = str(domain_check.get("greeting_response") or "").strip()
+        if (
+            decision == "greeting_only"
+            and confidence >= greeting_threshold
+            and greeting_response
+        ):
+            answer = greeting_response
+            skip_reason = (
+                "Greeting-only request; Knowledge Base, web search, and Nova "
+                "generation bypassed."
+            )
+            state.final_output = {
+                "status": "greeting_only",
+                "answer": answer,
+                "sources": [],
+                "citation_count": 0,
+                "evidence_origin": "none",
+                "domain_check": domain_check,
+            }
+            status_action = "greeting"
+            status_description = "Nova responded to the greeting"
+        elif (
+            decision == "out_of_domain"
+            and confidence >= out_of_domain_threshold
+            and not self._domain_signals(query)
+        ):
+            answer = self.OUT_OF_DOMAIN_MESSAGE
+            skip_reason = (
+                "High-confidence out_of_domain result; retrieval and generation "
+                "bypassed."
+            )
+            state.final_output = {
+                "status": "out_of_domain",
+                "answer": answer,
+                "sources": [],
+                "citation_count": 0,
+                "domain_check": domain_check,
+            }
+            status_action = "out_of_domain"
+            status_description = "Request is outside Nova's supported domain"
+        else:
+            return None
+
+        for name in (
+            "01-retrieve",
+            "02-rerank",
+            "03-validate-kb",
+            "04-web-search",
+            "05-web-filter",
+            "06-web-validate",
+            "07-build-context",
+            "08-nova-input",
+            "09-nova-output",
+        ):
+            await trace.step(
+                name,
+                {"query": query},
+                {"skipped": True, "reason": skip_reason},
+            )
+        await trace.step("10-finalize", {"query": query}, state.final_output)
+        await self._replace_message_sources(event_emitter, message_id, [])
+        await self._emit_status(
+            event_emitter,
+            status_action,
+            status_description,
+            done=True,
+        )
+        return answer
+
+    async def _retrieve_and_validate_kb(
+        self,
+        trace: TraceSession,
+        request: Any,
+        query: str,
+        include_content: bool,
+        event_emitter: Any,
+    ) -> list[dict[str, Any]]:
+        """Retrieve, expose reranking metadata, and validate Knowledge Base chunks."""
+        await self._emit_status(
+            event_emitter,
+            "knowledge_search",
+            "Searching the Knowledge Base",
+            query=query,
+        )
+        chunks, _ = await trace.measure(
+            "01-retrieve",
+            {
+                "query": query,
+                "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID"),
+            },
+            lambda: self._retrieve(request, query),
+            output_builder=lambda result: {
+                "chunk_count": len(result[0]),
+                "retrieval_call_count": 1,
+                "rag_owner": "pipe",
+                "chunks": self._chunk_details(result[0], include_content),
+                "embedding_usage": result[1],
+            },
+            run_type="retriever",
+        )
+        retrieved_sources = self._sources(chunks)
+        await self._emit_status(
+            event_emitter,
+            "sources_retrieved",
+            "Knowledge Base retrieval completed",
+            count=len(retrieved_sources),
+            source_count=len(retrieved_sources),
+            chunk_count=len(chunks),
+        )
+
+        validation: dict[str, Any] = {
+            "decision": {
+                "accepted_ranks": [],
+                "rejected_ranks": [],
+                "reason": "No Knowledge Base chunks retrieved.",
+            },
+            "raw_response": "",
+        }
+        if not chunks:
+            await trace.step(
+                "02-rerank",
+                {"input_ranks": [], "skipped": True},
+                {
+                    "output_ranks": [],
+                    "skipped": True,
+                    "reason": "No Knowledge Base chunks retrieved.",
+                },
+            )
+            await trace.step(
+                "03-validate-kb",
+                {"query": query, "chunks": []},
+                {
+                    "accepted": [],
+                    "rejected_ranks": [],
+                    **validation,
+                    "skipped": True,
+                    "reason": "No Knowledge Base chunks retrieved.",
+                },
+            )
+            return []
+
+        reranker = getattr(request.app.state, "RERANKING_FUNCTION", None)
+        config = getattr(request.app.state, "config", None)
+        reranker_config = {
+            "hybrid_search_enabled": bool(
+                self._config_value(config, "ENABLE_RAG_HYBRID_SEARCH", False)
+            ),
+            "reranker_configured": bool(reranker),
+            "reranking_engine": self._config_value(
+                config, "RAG_RERANKING_ENGINE", ""
+            ),
+            "reranking_model": self._config_value(
+                config, "RAG_RERANKING_MODEL", ""
+            ),
+            "top_k_reranker": self._config_value(config, "TOP_K_RERANKER", None),
+            "relevance_threshold": self._config_value(
+                config, "RELEVANCE_THRESHOLD", None
+            ),
+        }
+        ranks = [chunk["rank"] for chunk in chunks]
+        rerank_handle = await trace.begin_step(
+            "02-rerank",
+            {"input_ranks": ranks, **reranker_config},
+        )
+        await trace.end_step(
+            rerank_handle,
+            {
+                "input_ranks": ranks,
+                "output_ranks": ranks,
+                "ordered_chunks": self._chunk_details(chunks, include_content),
+                "reranker_config": reranker_config,
+                "timing_status": "snapshot",
+                "note": (
+                    "query_collection returned this final order. Distances are "
+                    "retrieval return values; Open WebUI does not expose a separate "
+                    "reranker score here."
+                ),
+            },
+        )
+        await self._emit_status(
+            event_emitter,
+            "validate_kb",
+            "Validating Knowledge Base evidence",
+            chunk_count=len(chunks),
+            source_count=len(retrieved_sources),
+        )
+        validated, _ = await trace.measure(
+            "03-validate-kb",
+            {
+                "query": query,
+                "chunks": self._chunk_details(chunks, include_content),
+            },
+            lambda: self._validate(query, chunks),
+            output_builder=lambda result: {
+                "accepted": self._chunk_details(result[0], include_content),
+                "rejected_ranks": [
+                    chunk["rank"] for chunk in chunks if chunk not in result[0]
+                ],
+                **result[1],
+            },
+            usage_builder=lambda result: result[1].get("usage_metadata"),
+            run_type="llm",
+            metadata=self._ls_model_metadata(
+                "google_genai",
+                self._setting("VALIDATION_MODEL"),
+            ),
+        )
+        return validated
+
+    async def _maybe_search_web(
+        self,
+        trace: TraceSession,
+        request: Any,
+        query: str,
+        user: Any,
+        validated_chunks: list[dict[str, Any]],
+        include_content: bool,
+        web_enabled: bool,
+        event_emitter: Any,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Use web fallback only when validated Knowledge Base sources are insufficient."""
+        if len(self._sources(validated_chunks)) >= int(self._setting("MIN_SOURCES")):
+            web_report = {
+                "enabled": web_enabled,
+                "skipped": True,
+                "reason": "Knowledge Base evidence was sufficient.",
+            }
+            for name in ("04-web-search", "05-web-filter", "06-web-validate"):
+                await trace.step(
+                    name,
+                    {"query": query},
+                    {"skipped": True, "reason": web_report["reason"]},
+                )
+            return [], web_report
+
+        if not web_enabled:
+            web_report = {"enabled": False, "reason": "disabled_by_valve"}
+            await trace.step(
+                "04-web-search",
+                {"query": query, "enabled": False},
+                {
+                    "enabled": False,
+                    "skipped": True,
+                    "reason": "ENABLE_WEB_SEARCH is false.",
+                },
+            )
+            await trace.step(
+                "05-web-filter",
+                {"enabled": False},
+                {"skipped": True, "reason": "Web search disabled."},
+            )
+            await trace.step(
+                "06-web-validate",
+                {"enabled": False},
+                {"skipped": True, "reason": "Web search disabled."},
+            )
+            return [], web_report
+
+        try:
+            from open_webui.models.users import UserModel
+
+            web_user = UserModel.model_validate(user) if isinstance(user, dict) else user
+            return await self._web_search(
+                request,
+                query,
+                web_user,
+                include_content,
+                trace=trace,
+                event_emitter=event_emitter,
+            )
+        except Exception as exc:
+            web_report = {
+                "enabled": True,
+                "error": f"{type(exc).__name__}: {exc}",
+                "queries": self._web_queries(query),
+            }
+            await trace.step(
+                "web-fallback-error",
+                {"query": query, "queries": web_report["queries"]},
+                {
+                    "enabled": True,
+                    "reason": "Web search failed; no external evidence accepted.",
+                    "error": web_report["error"],
+                },
+                error=type(exc).__name__,
+            )
+            return [], web_report
+
+    @staticmethod
+    def _select_evidence(
+        validated_chunks: list[dict[str, Any]],
+        web_chunks: list[dict[str, Any]],
+        web_report: dict[str, Any],
+    ) -> _EvidenceResult:
+        """Prefer validated web fallback when present; otherwise retain KB evidence."""
+        if web_chunks:
+            return _EvidenceResult(web_chunks, "web_search", web_report)
+        if validated_chunks:
+            return _EvidenceResult(validated_chunks, "knowledge_base", web_report)
+        return _EvidenceResult([], "none", web_report)
+
+    async def _gather_evidence(
+        self,
+        trace: TraceSession,
+        request: Any,
+        query: str,
+        user: Any,
+        include_content: bool,
+        web_enabled: bool,
+        event_emitter: Any,
+    ) -> _EvidenceResult:
+        """Coordinate Knowledge Base retrieval and the optional web fallback."""
+        validated_chunks = await self._retrieve_and_validate_kb(
+            trace,
+            request,
+            query,
+            include_content,
+            event_emitter,
+        )
+        web_chunks, web_report = await self._maybe_search_web(
+            trace,
+            request,
+            query,
+            user,
+            validated_chunks,
+            include_content,
+            web_enabled,
+            event_emitter,
+        )
+        return self._select_evidence(validated_chunks, web_chunks, web_report)
+
+    async def _build_evidence_context(
+        self,
+        trace: TraceSession,
+        evidence: _EvidenceResult,
+        web_enabled: bool,
+        include_content: bool,
+        event_emitter: Any,
+    ) -> _EvidenceContext:
+        """Build bounded context and citations from the exact chunks sent to Nova."""
+        await self._emit_status(
+            event_emitter,
+            "build_context",
+            "Preparing grounded context",
+            origin=evidence.origin,
+        )
+        context_handle = await trace.begin_step(
+            "07-build-context",
+            {
+                "evidence_origin": evidence.origin,
+                "validated_ranks": [chunk["rank"] for chunk in evidence.chunks],
+            },
+        )
+        if evidence.chunks:
+            context, included_ranks = self._context(
+                evidence.chunks,
+                int(self._setting("MAX_CONTEXT_CHARS")),
+            )
+            citation_chunks = [
+                chunk
+                for index, chunk in enumerate(evidence.chunks, 1)
+                if index in included_ranks
+            ]
+        else:
+            web_status = (
+                "enabled but no validated result"
+                if web_enabled
+                else "disabled by configuration"
+            )
+            context = (
+                "<NO_RELEVANT_EVIDENCE>\n"
+                "No validated Knowledge Base evidence was found for this question.\n"
+                f"Web search status: {web_status}.\n"
+                "</NO_RELEVANT_EVIDENCE>"
+            )
+            included_ranks = []
+            citation_chunks = []
+
+        sources = self._sources(citation_chunks)
+        await trace.end_step(
+            context_handle,
+            {
+                "included_ranks": included_ranks,
+                "evidence_origin": evidence.origin,
+                "context": context if include_content else "<content omitted>",
+                "context_chars": len(context),
+                "sources": sources,
+                "no_relevant_evidence": not bool(evidence.chunks),
+            },
+        )
+        return _EvidenceContext(context, sources, included_ranks)
+
+    async def _prepare_nova(
+        self,
+        body: dict[str, Any],
+        context: str,
+        evidence_origin: str,
+        user: Any,
+    ) -> _PreparedNova:
+        """Resolve Nova's preset, system prompt, base model, and provider body."""
+        from open_webui.models.models import Models
+        from open_webui.models.users import UserModel
+
+        prepared_user = UserModel.model_validate(user) if isinstance(user, dict) else user
+        prepared_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
+        system_prompt = None
+        if prepared_model and prepared_model.params:
+            system_prompt = prepared_model.params.model_dump().get("system")
+        preset_body = self._build_nova_body(body, context, evidence_origin)
+        provider_body = await self._effective_nova_request(
+            preset_body,
+            prepared_model,
+            prepared_user,
+        )
+        return _PreparedNova(
+            prepared_user,
+            prepared_model,
+            system_prompt,
+            preset_body,
+            provider_body,
+        )
+
+    async def _generate_nova_answer(
+        self,
+        trace: TraceSession,
+        request: Any,
+        body: dict[str, Any],
+        user: Any,
+        evidence: _EvidenceResult,
+        context: _EvidenceContext,
+        include_content: bool,
+        event_emitter: Any,
+    ) -> _NovaAnswer:
+        """Trace Nova request preparation and generate one clean assistant payload."""
+        prepared = await trace.measure(
+            "08-nova-input",
+            {
+                "model": self._setting("NOVA_MODEL"),
+                "evidence_origin": evidence.origin,
+                "context": context.text if include_content else "<content omitted>",
+            },
+            lambda: self._prepare_nova(
+                body,
+                context.text,
+                evidence.origin,
+                user,
+            ),
+            output_builder=lambda result: {
+                "nova_preset_id": self._setting("NOVA_MODEL"),
+                "resolved_base_model_id": result.provider_body.get("model"),
+                "rag_owner": "pipe",
+                "native_rag_controls_forwarded": False,
+                "preset_request": (
+                    result.preset_body
+                    if include_content
+                    else {
+                        "model": result.preset_body["model"],
+                        "stream": True,
+                        "message_count": len(result.preset_body.get("messages", [])),
+                    }
+                ),
+                "effective_provider_request": (
+                    result.provider_body
+                    if include_content
+                    else {
+                        "model": result.provider_body.get("model"),
+                        "stream": result.provider_body.get("stream"),
+                        "message_count": len(result.provider_body.get("messages", [])),
+                    }
+                ),
+                "configured_system_prompt": (
+                    result.system_prompt or "<not found in model preset>"
+                ),
+                "system_prompt_applied_by": "Nova V2 Pipe",
+                "evidence_origin": evidence.origin,
+                "web_search_report": evidence.web_report,
+                "note": (
+                    "The effective provider request is sent directly to Nova's base "
+                    "model. Model knowledge, files, tools, and web controls are excluded."
+                ),
+            },
+        )
+        provider_model = str(
+            prepared.provider_body.get("model") or self._setting("NOVA_MODEL")
+        )
+        nova_usage_report: dict[str, Any] = {}
+
+        async def build_nova_output(
+            result: tuple[list[Any], str, dict[str, Any]],
+        ) -> dict[str, Any]:
+            nonlocal nova_usage_report
+            nova_usage_report = await self._nova_usage(
+                result[2],
+                model=provider_model,
+            )
+            return {
+                "event_count": len(result[0]),
+                "final_output": result[1],
+                "raw_events": result[0] if include_content else ["<events omitted>"],
+                **nova_usage_report,
+            }
+
+        await self._emit_status(
+            event_emitter,
+            "nova_generate",
+            "Nova is generating the answer",
+            origin=evidence.origin,
+            source_count=len(context.sources),
+        )
+        _, nova_output, raw_usage = await trace.measure(
+            "09-nova-output",
+            {
+                "model": provider_model,
+                "nova_preset_id": self._setting("NOVA_MODEL"),
+                "rag_owner": "pipe",
+            },
+            lambda: self._nova(request, prepared.provider_body, prepared.user),
+            output_builder=build_nova_output,
+            usage_builder=lambda result: nova_usage_report.get("usage_metadata"),
+            run_type="llm",
+            metadata=self._ls_model_metadata(
+                str(self._setting("NOVA_PROVIDER") or "openwebui"),
+                provider_model,
+            ),
+        )
+        return _NovaAnswer(nova_output, raw_usage, provider_model)
+
+    async def _finalize_response(
+        self,
+        trace: TraceSession,
+        state: _PipeRunState,
+        answer: _NovaAnswer,
+        evidence: _EvidenceResult,
+        context: _EvidenceContext,
+        event_emitter: Any,
+        message_id: Optional[str],
+    ) -> AsyncGenerator[Any, None]:
+        """Trace and emit the answer, citations, usage, and completion status."""
+        state.final_output = {
+            "status": "success",
+            "answer": answer.text,
+            "sources": context.sources,
+            "citation_count": len(context.sources),
+            "evidence_origin": evidence.origin,
+            "nova_preset_id": self._setting("NOVA_MODEL"),
+            "resolved_base_model_id": answer.provider_model,
+            "rag_owner": "pipe",
+            "retrieval_call_count": 1,
+        }
+        finalize_handle = await trace.begin_step(
+            "10-finalize",
+            {"answer": answer.text},
+        )
+        await trace.end_step(finalize_handle, state.final_output)
+
+        if answer.text:
+            yield answer.text
+        for source in context.sources:
+            yield {"event": {"type": "source", "data": source}}
+        if answer.raw_usage:
+            yield {"usage": answer.raw_usage}
+
+        await self._replace_message_sources(
+            event_emitter,
+            message_id,
+            context.sources,
+        )
+        await self._emit_status(
+            event_emitter,
+            "complete",
+            "Answer completed",
+            done=True,
+            origin=evidence.origin,
+            source_count=len(context.sources),
+        )
+
+    async def _handle_pipe_error(
+        self,
+        trace: TraceSession,
+        state: _PipeRunState,
+        query: str,
+        error: Exception,
+        event_emitter: Any,
+        message_id: Optional[str],
+    ) -> str:
+        """Record a safe terminal error without exposing internal details to users."""
+        state.final_output = {
+            "status": "error",
+            "error_type": type(error).__name__,
+            "error": str(error),
+        }
+        await trace.step(
+            "error",
+            {"query": query},
+            state.final_output,
+            error=type(error).__name__,
+        )
+        await self._replace_message_sources(event_emitter, message_id, [])
+        await self._emit_status(
+            event_emitter,
+            "error",
+            "Unable to complete the request",
+            done=True,
+            error=True,
+        )
+        return (
+            "The Knowledge Base Pipe could not complete this request: "
+            f"{type(error).__name__}."
+        )
+
     async def pipe(
         self,
         body: dict[str, Any],
@@ -1425,25 +2186,12 @@ WEB EVIDENCE:\n{evidence}"""
         __message_id__: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
         if __task__:
-            if __request__ is None:
-                raise RuntimeError("Open WebUI task dispatch requires a request context")
-
-            # Title, tag, emoji, and follow-up generation prompts are Open WebUI
-            # control tasks, not user questions. Sending them through domain/RAG
-            # can leak the control prompt into retrieval or web search. Delegate
-            # them directly to Nova and let the outer task endpoint consume the
-            # clean text result.
-            from open_webui.models.models import Models
-            from open_webui.models.users import UserModel
-
-            task_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
-            task_body = copy.deepcopy(body)
-            task_body["model"] = self._setting("NOVA_MODEL")
-            task_body["stream"] = True
-            task_body.setdefault("stream_options", {"include_usage": True})
-            task_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
-            task_provider_body = await self._effective_nova_request(task_body, task_model, task_user)
-            _, task_output, _ = await self._nova(__request__, task_provider_body, task_user)
+            task_output = await self._handle_task(
+                body,
+                __user__,
+                __request__,
+                __task__,
+            )
             if task_output:
                 yield task_output
             return
@@ -1475,457 +2223,70 @@ WEB EVIDENCE:\n{evidence}"""
             endpoint=self._setting("LANGCHAIN_ENDPOINT"),
             project=self._setting("LANGCHAIN_PROJECT"),
         )
-        final_output: dict[str, Any] = {}
+        state = _PipeRunState()
         try:
-            web_enabled = bool(self._setting("ENABLE_WEB_SEARCH"))
-            await trace.start(
-                {
-                    "query": query,
-                    "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID"),
-                    "nova_model": self._setting("NOVA_MODEL"),
-                    "rag_owner": "pipe",
-                    "web_search_enabled": web_enabled,
-                    "domain_check_enabled": bool(self._setting("ENABLE_DOMAIN_CHECK")),
-                    "domain_check_model": self._setting("DOMAIN_CHECK_MODEL"),
-                    "cost_tracking": "langsmith_provider_usage_and_pricing",
-                }
-            )
-            include_content = bool(self._setting("TRACE_INCLUDE_CONTENT"))
-            await self._emit_status(
+            web_enabled, include_content = await self._start_trace(trace, query)
+            domain_check = await self._run_domain_check(
+                trace,
+                query,
+                include_content,
                 __event_emitter__,
-                "domain_check",
-                "Checking request domain",
             )
-            domain_check = await trace.measure(
-                "00-domain-check",
-                {
-                    "query": query,
-                    "prompt": DOMAIN_GATE_PROMPT if include_content else "<prompt omitted>",
-                },
-                lambda: self._domain_check(query),
-                output_builder=lambda result: result,
-                usage_builder=lambda result: result.get("usage_metadata"),
-                run_type="llm",
-                metadata=self._ls_model_metadata("google_genai", self._setting("DOMAIN_CHECK_MODEL")),
-            )
-            try:
-                out_of_domain_threshold = float(self._setting("DOMAIN_OUT_OF_DOMAIN_THRESHOLD"))
-            except (TypeError, ValueError):
-                out_of_domain_threshold = 0.90
-            try:
-                greeting_threshold = float(self._setting("GREETING_CONFIDENCE_THRESHOLD"))
-            except (TypeError, ValueError):
-                greeting_threshold = 0.90
-            greeting_response = str(domain_check.get("greeting_response") or "").strip()
-            if (
-                domain_check.get("decision") == "greeting_only"
-                and float(domain_check.get("confidence", 0.0)) >= greeting_threshold
-                and greeting_response
-            ):
-                skip_reason = "Greeting-only request; Knowledge Base, web search, and Nova generation bypassed."
-                for name in (
-                    "01-retrieve",
-                    "02-rerank",
-                    "03-validate-kb",
-                    "04-web-search",
-                    "05-web-filter",
-                    "06-web-validate",
-                    "07-build-context",
-                    "08-nova-input",
-                    "09-nova-output",
-                ):
-                    await trace.step(name, {"query": query}, {"skipped": True, "reason": skip_reason})
-                final_output = {
-                    "status": "greeting_only",
-                    "answer": greeting_response,
-                    "sources": [],
-                    "citation_count": 0,
-                    "evidence_origin": "none",
-                    "domain_check": domain_check,
-                }
-                await trace.step("10-finalize", {"query": query}, final_output)
-                await self._replace_message_sources(
-                    __event_emitter__,
-                    __message_id__,
-                    [],
-                )
-                await self._emit_status(
-                    __event_emitter__,
-                    "greeting",
-                    "Nova responded to the greeting",
-                    done=True,
-                )
-                yield greeting_response
-                return
-            if (
-                domain_check.get("decision") == "out_of_domain"
-                and float(domain_check.get("confidence", 0.0)) >= out_of_domain_threshold
-                and not self._domain_signals(query)
-            ):
-                skip_reason = "High-confidence out_of_domain result; retrieval and generation bypassed."
-                for name in (
-                    "01-retrieve",
-                    "02-rerank",
-                    "03-validate-kb",
-                    "04-web-search",
-                    "05-web-filter",
-                    "06-web-validate",
-                    "07-build-context",
-                    "08-nova-input",
-                    "09-nova-output",
-                ):
-                    await trace.step(name, {"query": query}, {"skipped": True, "reason": skip_reason})
-                final_output = {
-                    "status": "out_of_domain",
-                    "answer": self.OUT_OF_DOMAIN_MESSAGE,
-                    "sources": [],
-                    "citation_count": 0,
-                    "domain_check": domain_check,
-                }
-                await trace.step("10-finalize", {"query": query}, final_output)
-                await self._replace_message_sources(
-                    __event_emitter__,
-                    __message_id__,
-                    [],
-                )
-                await self._emit_status(
-                    __event_emitter__,
-                    "out_of_domain",
-                    "Request is outside Nova's supported domain",
-                    done=True,
-                )
-                yield self.OUT_OF_DOMAIN_MESSAGE
-                return
-            await self._emit_status(
-                __event_emitter__,
-                "knowledge_search",
-                "Searching the Knowledge Base",
-                query=query,
-            )
-            chunks, embedding_report = await trace.measure(
-                "01-retrieve",
-                {"query": query, "knowledge_base_id": self._setting("KNOWLEDGE_BASE_ID")},
-                lambda: self._retrieve(__request__, query),
-                output_builder=lambda result: {
-                    "chunk_count": len(result[0]),
-                    "retrieval_call_count": 1,
-                    "rag_owner": "pipe",
-                    "chunks": self._chunk_details(result[0], include_content),
-                    "embedding_usage": result[1],
-                },
-                run_type="retriever",
-            )
-            retrieved_sources = self._sources(chunks)
-            await self._emit_status(
-                __event_emitter__,
-                "sources_retrieved",
-                "Knowledge Base retrieval completed",
-                count=len(retrieved_sources),
-                source_count=len(retrieved_sources),
-                chunk_count=len(chunks),
-            )
-
-            validated: list[dict[str, Any]] = []
-            validation: dict[str, Any] = {
-                "decision": {"accepted_ranks": [], "rejected_ranks": [], "reason": "No Knowledge Base chunks retrieved."},
-                "raw_response": "",
-            }
-            if chunks:
-                # query_collection returns the final ranked order. If hybrid search is enabled,
-                # its configured reranker has already been applied inside Open WebUI.
-                reranker = getattr(__request__.app.state, "RERANKING_FUNCTION", None)
-                config = getattr(__request__.app.state, "config", None)
-                hybrid_enabled = bool(self._config_value(config, "ENABLE_RAG_HYBRID_SEARCH", False))
-                reranker_config = {
-                    "hybrid_search_enabled": hybrid_enabled,
-                    "reranker_configured": bool(reranker),
-                    "reranking_engine": self._config_value(config, "RAG_RERANKING_ENGINE", ""),
-                    "reranking_model": self._config_value(config, "RAG_RERANKING_MODEL", ""),
-                    "top_k_reranker": self._config_value(config, "TOP_K_RERANKER", None),
-                    "relevance_threshold": self._config_value(config, "RELEVANCE_THRESHOLD", None),
-                }
-                ranks = [c["rank"] for c in chunks]
-                rerank_handle = await trace.begin_step(
-                    "02-rerank",
-                    {"input_ranks": ranks, **reranker_config},
-                )
-                rerank_output = {
-                    "input_ranks": ranks,
-                    "output_ranks": ranks,
-                    "ordered_chunks": self._chunk_details(chunks, include_content),
-                    "reranker_config": reranker_config,
-                    "timing_status": "snapshot",
-                    "note": "query_collection returned this final order. Distances are retrieval return values; Open WebUI does not expose a separate reranker score here.",
-                }
-                await trace.end_step(rerank_handle, rerank_output)
-                await self._emit_status(
-                    __event_emitter__,
-                    "validate_kb",
-                    "Validating Knowledge Base evidence",
-                    chunk_count=len(chunks),
-                    source_count=len(retrieved_sources),
-                )
-                validated, validation = await trace.measure(
-                    "03-validate-kb",
-                    {"query": query, "chunks": self._chunk_details(chunks, include_content)},
-                    lambda: self._validate(query, chunks),
-                    output_builder=lambda result: {
-                        "accepted": self._chunk_details(result[0], include_content),
-                        "rejected_ranks": [c["rank"] for c in chunks if c not in result[0]],
-                        **result[1],
-                    },
-                    usage_builder=lambda result: result[1].get("usage_metadata"),
-                    run_type="llm",
-                    metadata=self._ls_model_metadata("google_genai", self._setting("VALIDATION_MODEL")),
-                )
-            else:
-                await trace.step(
-                    "02-rerank",
-                    {"input_ranks": [], "skipped": True},
-                    {"output_ranks": [], "skipped": True, "reason": "No Knowledge Base chunks retrieved."},
-                )
-            if not chunks:
-                await trace.step(
-                    "03-validate-kb",
-                    {"query": query, "chunks": []},
-                    {"accepted": [], "rejected_ranks": [], **validation, "skipped": True, "reason": "No Knowledge Base chunks retrieved."},
-                )
-
-            kb_sources = self._sources(validated)
-            web_chunks: list[dict[str, Any]] = []
-            web_report: dict[str, Any]
-            web_validation: dict[str, Any] = {}
-            if len(kb_sources) < int(self._setting("MIN_SOURCES")):
-                if web_enabled:
-                    try:
-                        from open_webui.models.users import UserModel
-
-                        web_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
-                        web_chunks, web_report = await self._web_search(
-                            __request__,
-                            query,
-                            web_user,
-                            include_content,
-                            trace=trace,
-                            event_emitter=__event_emitter__,
-                        )
-                        web_validation = web_report.get("validation", {})
-                    except Exception as exc:
-                        web_report = {
-                            "enabled": True,
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "queries": self._web_queries(query),
-                        }
-                        await trace.step(
-                            "web-fallback-error",
-                            {"query": query, "queries": web_report["queries"]},
-                            {"enabled": True, "reason": "Web search failed; no external evidence accepted.", "error": web_report["error"]},
-                            error=type(exc).__name__,
-                        )
-                else:
-                    web_report = {"enabled": False, "reason": "disabled_by_valve"}
-                    await trace.step(
-                        "04-web-search",
-                        {"query": query, "enabled": False},
-                        {"enabled": False, "skipped": True, "reason": "ENABLE_WEB_SEARCH is false."},
-                    )
-                    await trace.step(
-                        "05-web-filter",
-                        {"enabled": False},
-                        {"skipped": True, "reason": "Web search disabled."},
-                    )
-                    await trace.step(
-                        "06-web-validate",
-                        {"enabled": False},
-                        {"skipped": True, "reason": "Web search disabled."},
-                    )
-            else:
-                web_report = {"enabled": web_enabled, "skipped": True, "reason": "Knowledge Base evidence was sufficient."}
-                for name in ("04-web-search", "05-web-filter", "06-web-validate"):
-                    await trace.step(name, {"query": query}, {"skipped": True, "reason": web_report["reason"]})
-
-            evidence_chunks = web_chunks if web_chunks else validated
-            evidence_origin = "web_search" if web_chunks else ("knowledge_base" if validated else "none")
-            await self._emit_status(
-                __event_emitter__,
-                "build_context",
-                "Preparing grounded context",
-                origin=evidence_origin,
-            )
-            context_handle = await trace.begin_step(
-                "07-build-context",
-                {"evidence_origin": evidence_origin, "validated_ranks": [c["rank"] for c in evidence_chunks]},
-            )
-            if evidence_chunks:
-                context, included_ranks = self._context(evidence_chunks, int(self._setting("MAX_CONTEXT_CHARS")))
-                citation_chunks = [
-                    chunk
-                    for index, chunk in enumerate(evidence_chunks, 1)
-                    if index in included_ranks
-                ]
-            else:
-                context = (
-                    "<NO_RELEVANT_EVIDENCE>\n"
-                    "No validated Knowledge Base evidence was found for this question.\n"
-                    f"Web search status: {'enabled but no validated result' if web_enabled else 'disabled by configuration'}.\n"
-                    "</NO_RELEVANT_EVIDENCE>"
-                )
-                included_ranks = []
-                citation_chunks = []
-            sources = self._sources(citation_chunks)
-            await trace.end_step(
-                context_handle,
-                {
-                    "included_ranks": included_ranks,
-                    "evidence_origin": evidence_origin,
-                    "context": context if include_content else "<content omitted>",
-                    "context_chars": len(context),
-                    "sources": sources,
-                    "no_relevant_evidence": not bool(evidence_chunks),
-                },
-            )
-            from open_webui.models.models import Models
-            from open_webui.models.users import UserModel
-
-            async def prepare_nova() -> tuple[Any, Any, Any, dict[str, Any], dict[str, Any]]:
-                prepared_user = UserModel.model_validate(__user__) if isinstance(__user__, dict) else __user__
-                prepared_model = await Models.get_model_by_id(self._setting("NOVA_MODEL"))
-                prepared_system_prompt = None
-                if prepared_model and prepared_model.params:
-                    prepared_system_prompt = prepared_model.params.model_dump().get("system")
-                prepared_body = self._build_nova_body(body, context, evidence_origin)
-                prepared_effective_body = await self._effective_nova_request(
-                    prepared_body, prepared_model, prepared_user
-                )
-                return (
-                    prepared_user,
-                    prepared_model,
-                    prepared_system_prompt,
-                    prepared_body,
-                    prepared_effective_body,
-                )
-
-            user, nova_model, system_prompt, downstream_body, effective_body = await trace.measure(
-                "08-nova-input",
-                {"model": self._setting("NOVA_MODEL"), "evidence_origin": evidence_origin, "context": context if include_content else "<content omitted>"},
-                prepare_nova,
-                output_builder=lambda result: {
-                    "nova_preset_id": self._setting("NOVA_MODEL"),
-                    "resolved_base_model_id": result[4].get("model"),
-                    "rag_owner": "pipe",
-                    "native_rag_controls_forwarded": False,
-                    "preset_request": result[3] if include_content else {"model": result[3]["model"], "stream": True, "message_count": len(result[3].get("messages", []))},
-                    "effective_provider_request": result[4] if include_content else {"model": result[4].get("model"), "stream": result[4].get("stream"), "message_count": len(result[4].get("messages", []))},
-                    "configured_system_prompt": result[2] or "<not found in model preset>",
-                    "system_prompt_applied_by": "Nova V2 Pipe",
-                    "evidence_origin": evidence_origin,
-                    "web_search_report": web_report,
-                    "note": "The effective provider request is sent directly to Nova's base model. Model knowledge, files, tools, and web controls are excluded.",
-                },
-            )
-            nova_provider_model = str(effective_body.get("model") or self._setting("NOVA_MODEL"))
-            nova_usage_report: dict[str, Any] = {}
-
-            async def build_nova_output(result: tuple[list[Any], str, dict[str, Any]]) -> dict[str, Any]:
-                nonlocal nova_usage_report
-                nova_usage_report = await self._nova_usage(
-                    result[2],
-                    model=nova_provider_model,
-                )
-                return {
-                    "event_count": len(result[0]),
-                    "final_output": result[1],
-                    "raw_events": result[0] if include_content else ["<events omitted>"],
-                    **nova_usage_report,
-                }
-
-            await self._emit_status(
-                __event_emitter__,
-                "nova_generate",
-                "Nova is generating the answer",
-                origin=evidence_origin,
-                source_count=len(sources),
-            )
-            events, nova_output, nova_raw_usage = await trace.measure(
-                "09-nova-output",
-                {
-                    "model": nova_provider_model,
-                    "nova_preset_id": self._setting("NOVA_MODEL"),
-                    "rag_owner": "pipe",
-                },
-                lambda: self._nova(__request__, effective_body, user),
-                output_builder=build_nova_output,
-                usage_builder=lambda result: nova_usage_report.get("usage_metadata"),
-                run_type="llm",
-                metadata=self._ls_model_metadata(
-                    str(self._setting("NOVA_PROVIDER") or "openwebui"),
-                    nova_provider_model,
-                ),
-            )
-            # The internal dispatcher returns provider SSE frames. Do not
-            # forward those frames through the Pipe protocol: Open WebUI's
-            # outer stream handler would parse and serialize them a second
-            # time, which can introduce broken Markdown/word boundaries.
-            # Emit one clean assistant payload instead.
-            final_output = {
-                "status": "success",
-                "answer": nova_output,
-                "sources": sources,
-                "citation_count": len(sources),
-                "evidence_origin": evidence_origin,
-                "nova_preset_id": self._setting("NOVA_MODEL"),
-                "resolved_base_model_id": nova_provider_model,
-                "rag_owner": "pipe",
-                "retrieval_call_count": 1,
-            }
-            finalize_handle = await trace.begin_step("10-finalize", {"answer": nova_output})
-            await trace.end_step(finalize_handle, final_output)
-
-            if nova_output:
-                yield nova_output
-
-            # Realtime chat handles citations as event-emitter events. A
-            # top-level {"sources": [...]} object is ignored by the Pipe
-            # middleware, so emit one source event per grouped file/source.
-            for source in sources:
-                yield {"event": {"type": "source", "data": source}}
-
-            if nova_raw_usage:
-                yield {"usage": nova_raw_usage}
-
-            await self._replace_message_sources(
+            terminal_answer = await self._handle_domain_result(
+                trace,
+                state,
+                query,
+                domain_check,
                 __event_emitter__,
                 __message_id__,
-                sources,
             )
-
-            await self._emit_status(
+            if terminal_answer is not None:
+                yield terminal_answer
+                return
+            evidence = await self._gather_evidence(
+                trace,
+                __request__,
+                query,
+                __user__,
+                include_content,
+                web_enabled,
                 __event_emitter__,
-                "complete",
-                "Answer completed",
-                done=True,
-                origin=evidence_origin,
-                source_count=len(sources),
             )
+            context = await self._build_evidence_context(
+                trace,
+                evidence,
+                web_enabled,
+                include_content,
+                __event_emitter__,
+            )
+            answer = await self._generate_nova_answer(
+                trace,
+                __request__,
+                body,
+                __user__,
+                evidence,
+                context,
+                include_content,
+                __event_emitter__,
+            )
+            async for output in self._finalize_response(
+                trace,
+                state,
+                answer,
+                evidence,
+                context,
+                __event_emitter__,
+                __message_id__,
+            ):
+                yield output
         except Exception as exc:
-            final_output = {
-                "status": "error",
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-            }
-            await trace.step("error", {"query": query}, final_output, error=type(exc).__name__)
-            await self._replace_message_sources(
+            yield await self._handle_pipe_error(
+                trace,
+                state,
+                query,
+                exc,
                 __event_emitter__,
                 __message_id__,
-                [],
             )
-            await self._emit_status(
-                __event_emitter__,
-                "error",
-                "Unable to complete the request",
-                done=True,
-                error=True,
-            )
-            yield f"The Knowledge Base Pipe could not complete this request: {type(exc).__name__}."
         finally:
-            await trace.finish(final_output)
+            await trace.finish(state.final_output)
