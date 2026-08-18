@@ -35,6 +35,7 @@ from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import UserNameResponse, Users
+from open_webui.socket.channel_events import channel_event_patch
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
 from open_webui.utils.access_control import has_permission
@@ -838,16 +839,19 @@ async def _make_channel_emitter(request_info):
     state = {'last_emit_at': 0.0}
     THROTTLE_INTERVAL = 0.15  # ~6 updates/sec
 
-    async def _emit_channel_update(content: str, done: bool = False):
+    async def _emit_channel_update(
+        content: str, done: bool = False, data: dict | None = None
+    ):
         from open_webui.models.messages import MessageForm, Messages
 
-        update_form = MessageForm(content=content)
+        update_form = MessageForm(content=content, data=data)
         if done:
             # Merge done flag into existing meta (preserve model_id etc.)
             msg = await Messages.get_message_by_id(message_id)
             existing_meta = (msg.meta or {}) if msg else {}
             update_form = MessageForm(
                 content=content,
+                data=data,
                 meta={**existing_meta, 'done': True},
             )
 
@@ -887,6 +891,26 @@ async def _make_channel_emitter(request_info):
             error = event_data.get('data', {}).get('error', {})
             error_content = error.get('content', 'An error occurred') if isinstance(error, dict) else str(error)
             await _emit_channel_update(f'Error: {error_content}', done=True)
+
+        elif event_type in {'status', 'source', 'citation', 'chat:outlet'}:
+            from open_webui.models.messages import Messages
+
+            message = await Messages.get_message_by_id(message_id)
+            if not message:
+                return
+
+            patch = channel_event_patch(
+                event_type=event_type,
+                event_payload=event_data.get('data', {}),
+                message_id=message_id,
+                content=message.content or '',
+                data=message.data,
+            )
+            if patch is not None:
+                await _emit_channel_update(
+                    patch['content'],
+                    data=patch['data'],
+                )
 
     return __channel_emitter__
 

@@ -36,9 +36,16 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Emoji from '$lib/components/common/Emoji.svelte';
 	import Skeleton from '$lib/components/chat/Messages/Skeleton.svelte';
+	import Citations from '$lib/components/chat/Messages/Citations.svelte';
+	import StatusHistory from '$lib/components/chat/Messages/ResponseMessage/StatusHistory.svelte';
 	import ArrowUpLeftAlt from '$lib/components/icons/ArrowUpLeftAlt.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
+	import {
+		channelSources,
+		channelStatusHistory,
+		shouldShowModelSkeleton
+	} from './messagePresentation';
 
 	export let className = '';
 
@@ -61,6 +68,9 @@
 	export let onReaction: Function = () => {};
 
 	let showButtons = false;
+
+	$: statusHistory = channelStatusHistory(message);
+	$: sources = channelSources(message);
 
 	let edit = false;
 	let editedContent = null;
@@ -521,8 +531,14 @@
 							</div>
 						</div>
 					{:else}
+						{#if statusHistory.length > 0}
+							<div class="mb-1">
+								<StatusHistory {statusHistory} />
+							</div>
+						{/if}
+
 						<div class=" min-w-full markdown-prose {pending ? 'opacity-50' : ''}">
-							{#if (message?.content ?? '').trim() === '' && message?.meta?.model_id}
+							{#if shouldShowModelSkeleton(message)}
 								<Skeleton />
 							{:else}
 								<Markdown
@@ -535,6 +551,10 @@
 									>{/if}
 							{/if}
 						</div>
+
+						{#if sources.length > 0}
+							<Citations id={message.id} chatId={channel?.id ?? ''} {sources} readOnly={true} />
+						{/if}
 
 						{#if (message?.reactions ?? []).length > 0}
 							<div>
@@ -619,7 +639,9 @@
 						{#if !thread && message.reply_count > 0}
 							<div class="flex items-center gap-1.5 -mt-0.5 mb-1.5">
 								{#if unreadMention}
-									<span class="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-600 dark:text-sky-300">
+									<span
+										class="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-600 dark:text-sky-300"
+									>
 										<span class="font-bold">@</span>
 										{$i18n.t('You were mentioned')}
 									</span>
