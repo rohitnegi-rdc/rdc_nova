@@ -33,6 +33,10 @@ They must be different. Replace every `CHANGE_ME` value, including the server
 host/IP, Gemini key, LangSmith key, and Knowledge Base ID. Do not paste the
 completed file into chat or commit it.
 
+Keep `POSTGRES_PASSWORD` as the generated hexadecimal value. Reserved URL
+characters in a manually chosen password can be misinterpreted when Open WebUI
+constructs its database connection URL.
+
 For the first fresh deployment, keep `ENABLE_SIGNUP=true` so the first account
 can be created as administrator. Disable it after the administrator exists.
 
@@ -79,7 +83,9 @@ Expected application health response:
 ```
 
 Open `http://SERVER_IP:6010` from an allowed workstation and create or verify
-the administrator account.
+the administrator account. For the temporary no-Nginx binding, firewall check,
+and browser diagnostics, follow
+[openwebui-production-backup-restore.md](openwebui-production-backup-restore.md#3-temporary-direct-http-access-without-nginx).
 
 ## 7. Lock registration after the first administrator
 
@@ -112,6 +118,8 @@ If an existing deployment must be migrated, stop before this fresh-data setup.
 The PostgreSQL database and `rdc-nova-openwebui-data` volume must both be
 restored. PostgreSQL stores users and configuration; the Open WebUI data volume
 stores uploaded files, Chroma collections, and other local application data.
+Use the complete procedure in
+[openwebui-production-backup-restore.md](openwebui-production-backup-restore.md).
 
 ## 9. Operational commands
 
@@ -132,3 +140,64 @@ docker compose --env-file .env.production -f docker-compose.production.yaml down
 Never use `docker compose down -v` in production; it deletes both named data
 volumes. Add TLS through a reverse proxy before exposing the service beyond the
 trusted internal network.
+
+## 10. Repeatable deployment after `git pull`
+
+After the first deployment and restoration are complete, use the checked-in
+`deploy.sh` helper for later application releases:
+
+```bash
+cd ~/projects/rdc_nova
+git fetch origin
+git pull --ff-only origin main
+git status --short --branch
+bash deploy.sh
+```
+
+The script refuses a dirty checkout by default, validates `.env.production`
+without printing its values, validates the Compose configuration, and starts or
+checks PostgreSQL. It builds a Git-revision-tagged image while the old
+application remains online. Immediately before replacing Open WebUI, it stops
+the application and creates a consistent PostgreSQL dump plus application-data
+volume archive under `~/backups/`. It then recreates only Open WebUI and waits
+up to three minutes for `http://127.0.0.1:6010/health`.
+
+If deployment fails after replacement begins, the script prints recent logs and
+attempts to recreate Open WebUI from the previous image. Database migrations
+may not always be backward-compatible, so retain the pre-deployment backup for
+full recovery.
+
+After a successful health check, the script retains exactly two distinct
+`rdc-nova` image versions: the running image and the newest previous image for
+rollback. Older `rdc-nova` image tags are removed. This cleanup does not touch
+PostgreSQL, Docker volumes, backup archives, build cache, or unrelated images.
+
+Use these overrides only deliberately:
+
+```bash
+# Deploy without taking the default pre-deployment backup.
+bash deploy.sh --skip-backup
+
+# Deploy a reviewed checkout that intentionally contains local changes.
+bash deploy.sh --allow-dirty
+```
+
+Do not put `git pull` inside the deployment script. Keeping source update and
+deployment separate lets you inspect the exact commit before changing the
+running service.
+
+### Nova V2 function synchronization
+
+The Dockerfile builds Open WebUI's frontend and backend, but it does not install
+`tools/main_pipe.py` into the Function database. Open WebUI Functions are stored
+in PostgreSQL. Therefore, whenever `tools/main_pipe.py` changes:
+
+1. Complete `bash deploy.sh` and confirm the application is healthy.
+2. Open **Admin Panel > Functions > Nova V2**.
+3. Replace its source with the current `tools/main_pipe.py` contents and save.
+4. Preserve the existing valve values unless the release intentionally changes
+   them.
+5. Test greeting, out-of-domain, and grounded Knowledge Base questions; confirm
+   progress events, citations, and the LangSmith trace.
+
+Rebuilding the image alone does not update the installed Nova V2 Function.

@@ -2,6 +2,11 @@
 
 The verified WSL startup, troubleshooting, and Windows Playwright process is documented in [openwebui-wsl-visual-testing-runbook.md](openwebui-wsl-visual-testing-runbook.md).
 
+## Production operations
+
+- First manual deployment: [openwebui-production-manual-deployment.md](openwebui-production-manual-deployment.md)
+- Direct HTTP testing and complete PostgreSQL/Chroma backup restoration: [openwebui-production-backup-restore.md](openwebui-production-backup-restore.md)
+
 ## Docker image path
 
 ```powershell
