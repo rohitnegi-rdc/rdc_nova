@@ -163,6 +163,15 @@ frontend_base_path_check() {
     || fail "The frontend HTML does not reference base-prefixed Svelte assets."
 }
 
+socketio_check() {
+  local response
+  local socket_url="${HEALTH_URL%/health}/ws/socket.io/?EIO=4&transport=polling"
+
+  response="$(curl --silent --show-error --fail --max-time 10 "$socket_url")"
+  grep -Fq '"sid"' <<<"$response" \
+    || fail "The Socket.IO polling handshake did not return a session."
+}
+
 cleanup_old_application_images() {
   local current_image_id
   local image_id
@@ -294,6 +303,9 @@ health_check 36 5
 
 log "Verifying the frontend base path is ${WEBUI_BASE_PATH_VALUE}"
 frontend_base_path_check
+
+log "Verifying the Socket.IO handshake"
+socketio_check
 
 trap - ERR
 cleanup_old_application_images

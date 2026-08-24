@@ -430,6 +430,8 @@ try:
 except (ValueError, TypeError):
     UVICORN_WORKERS = 1
 
+ROOT_PATH = os.getenv('ROOT_PATH', '').strip()
+
 ####################################
 # WEBSOCKET SUPPORT
 ####################################

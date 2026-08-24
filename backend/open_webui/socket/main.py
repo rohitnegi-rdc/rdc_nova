@@ -16,6 +16,7 @@ from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
     GLOBAL_LOG_LEVEL,
     REDIS_KEY_PREFIX,
+    ROOT_PATH,
     VERSION,
     WEBSOCKET_EVENT_CALLER_TIMEOUT,
     WEBSOCKET_MANAGER,
@@ -36,6 +37,7 @@ from open_webui.models.chats import Chats
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import UserNameResponse, Users
 from open_webui.socket.channel_events import channel_event_patch
+from open_webui.socket.paths import socketio_path_for_root
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
 from open_webui.utils.access_control import has_permission
@@ -234,7 +236,7 @@ async def periodic_usage_pool_cleanup():
 
 app = socketio.ASGIApp(
     sio,
-    socketio_path='/ws/socket.io',
+    socketio_path=socketio_path_for_root(ROOT_PATH),
 )
 
 
