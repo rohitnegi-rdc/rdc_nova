@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { base } from '$app/paths';
 	import { getContext } from 'svelte';
 
@@ -41,7 +42,7 @@
 					class=" size-5 rounded-full -translate-x-[0.5px]"
 					alt="logo"
 					on:error={(e) => {
-						e.currentTarget.src = '/favicon.png';
+						applyImageFallback(e);
 					}}
 				/>
 			</div>

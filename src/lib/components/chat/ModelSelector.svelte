@@ -6,6 +6,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 
 	import { updateUserSettings } from '$lib/apis/users';
+	import { canSelectMultipleModels } from '$lib/utils/model-selection';
 	import equal from 'fast-deep-equal';
 	const i18n = getContext('i18n');
 
@@ -69,7 +70,7 @@
 				</div>
 			</div>
 
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true)}
+			{#if canSelectMultipleModels($user?.role)}
 				{#if selectedModelIdx === 0}
 					<div
 						class="  self-center mx-1 disabled:text-gray-600 disabled:hover:text-gray-600 -translate-y-[0.5px]"

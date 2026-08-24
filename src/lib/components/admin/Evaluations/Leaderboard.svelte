@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { onMount, getContext } from 'svelte';
 	import { models } from '$lib/stores';
 	import { getLeaderboard } from '$lib/apis/evaluations';
@@ -182,7 +183,7 @@
 									alt={model.name}
 									class="size-5 rounded-full object-cover shrink-0"
 									on:error={(e) => {
-										e.target.src = '/favicon.png';
+										applyImageFallback(e);
 									}}
 								/>
 								<Tooltip content={`${model.name} (${model.id})`} placement="top-start">

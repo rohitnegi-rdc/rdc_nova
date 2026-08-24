@@ -40,3 +40,20 @@ export function resolveSafeImageUrl(url: string, baseUrl: string): string {
 export function safeImageUrl(url: string): string {
 	return resolveSafeImageUrl(url, WEBUI_BASE_URL);
 }
+
+export function applyImageFallback(event: Event, baseUrl = WEBUI_BASE_URL): void {
+	const image = event.currentTarget as HTMLImageElement | null;
+	if (!image) {
+		return;
+	}
+
+	const fallback = `${baseUrl}${PLACEHOLDER_IMAGE}`;
+	const absoluteFallback = new URL(fallback, window.location.origin).href;
+
+	// A broken fallback must stop here instead of triggering an endless error/reload loop.
+	if (image.src === absoluteFallback) {
+		return;
+	}
+
+	image.src = fallback;
+}

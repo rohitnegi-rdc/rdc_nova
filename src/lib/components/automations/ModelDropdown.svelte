@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { getContext } from 'svelte';
 
 	import { models } from '$lib/stores';
@@ -108,7 +109,7 @@
 							class="rounded-full size-5 items-center mr-2"
 							loading="lazy"
 							on:error={(e) => {
-								e.currentTarget.src = '/favicon.png';
+								applyImageFallback(e);
 							}}
 						/>
 						<div class="truncate">

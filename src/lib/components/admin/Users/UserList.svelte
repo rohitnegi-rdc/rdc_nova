@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, showSidebar } from '$lib/stores';
 	import { goto } from '$lib/navigation';
@@ -379,7 +380,7 @@
 										src={`${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`}
 										alt="user"
 										on:error={(e) => {
-											e.currentTarget.src = '/favicon.png';
+											applyImageFallback(e);
 										}}
 									/>
 								</ProfilePreview>

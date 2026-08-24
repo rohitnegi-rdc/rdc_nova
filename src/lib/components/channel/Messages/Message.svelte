@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import isToday from 'dayjs/plugin/isToday';
@@ -344,7 +345,7 @@
 									message.reply_to_message.meta.model_id}
 								class="size-4 ml-0.5 rounded-full object-cover"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									applyImageFallback(e);
 								}}
 							/>
 						{:else}
@@ -387,7 +388,7 @@
 								alt={message.meta.model_name ?? message.meta.model_id}
 								class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									applyImageFallback(e);
 								}}
 							/>
 						{:else if message.user?.role === 'webhook'}

@@ -734,22 +734,6 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Allow Multiple Models in Chat')}
-				</div>
-				<Switch bind:state={permissions.chat.multiple_models} />
-			</div>
-			{#if defaultPermissions?.chat?.multiple_models && !permissions.chat.multiple_models}
-				<div>
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Allow Temporary Chat')}
 				</div>
 				<Switch bind:state={permissions.chat.temporary} />

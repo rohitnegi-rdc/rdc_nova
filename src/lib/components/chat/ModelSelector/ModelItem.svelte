@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { marked } from 'marked';
 
 	import { getContext, tick } from 'svelte';
@@ -87,7 +88,7 @@
 						class="rounded-full size-5 flex items-center"
 						loading="lazy"
 						on:error={(e) => {
-							e.currentTarget.src = '/favicon.png';
+							applyImageFallback(e);
 						}}
 					/>
 				</Tooltip>

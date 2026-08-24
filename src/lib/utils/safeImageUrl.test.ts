@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveSafeImageUrl } from './safeImageUrl';
+import { applyImageFallback, resolveSafeImageUrl } from './safeImageUrl';
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe('resolveSafeImageUrl', () => {
 	it('prefixes root-relative images for a subpath deployment', () => {
@@ -26,5 +30,18 @@ describe('resolveSafeImageUrl', () => {
 			'data:image/png;base64,AA=='
 		);
 		expect(resolveSafeImageUrl('/static/favicon.png', '')).toBe('/static/favicon.png');
+	});
+
+	it('applies the scoped fallback once without restarting an error loop', () => {
+		vi.stubGlobal('window', { location: { origin: 'https://suraksha.rdcc.ai' } });
+		const image = { src: 'https://suraksha.rdcc.ai/opsmitra/api/v1/models/missing' };
+		const event = { currentTarget: image } as unknown as Event;
+
+		applyImageFallback(event, '/opsmitra');
+		expect(image.src).toBe('/opsmitra/static/favicon.png');
+
+		image.src = 'https://suraksha.rdcc.ai/opsmitra/static/favicon.png';
+		applyImageFallback(event, '/opsmitra');
+		expect(image.src).toBe('https://suraksha.rdcc.ai/opsmitra/static/favicon.png');
 	});
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { marked } from 'marked';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -600,7 +601,7 @@
 											alt="modelfile profile"
 											class=" rounded-full w-full h-auto object-cover"
 											on:error={(e) => {
-												e.target.src = '/favicon.png';
+												applyImageFallback(e);
 											}}
 										/>
 									</div>

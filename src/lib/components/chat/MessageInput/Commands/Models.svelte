@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import Fuse from 'fuse.js';
 
 	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
@@ -87,7 +88,7 @@
 						alt={model?.name ?? model.id}
 						class="rounded-full size-5 items-center mr-2"
 						on:error={(e) => {
-							e.currentTarget.src = '/favicon.png';
+							applyImageFallback(e);
 						}}
 					/>
 					<div class="truncate">

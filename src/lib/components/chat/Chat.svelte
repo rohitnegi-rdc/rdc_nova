@@ -69,6 +69,10 @@
 		displayFileHandler
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
+	import {
+		canSelectMultipleModels,
+		normalizeSelectedModelsForRole
+	} from '$lib/utils/model-selection';
 
 	import {
 		archiveChatById,
@@ -144,6 +148,14 @@
 	let eventCallback = null;
 
 	let selectedModels = [''];
+	$: if ($user?.role && !canSelectMultipleModels($user.role)) {
+		const normalizedModels = normalizeSelectedModelsForRole(selectedModels, $user.role);
+
+		if (!equal(normalizedModels, selectedModels)) {
+			selectedModels = normalizedModels;
+		}
+	}
+
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
 	$: if (atSelectedModel !== undefined) {
@@ -1414,9 +1426,7 @@
 						? chatContent.models
 						: [chatContent.models ?? ''];
 
-				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
-					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
-				}
+				selectedModels = normalizeSelectedModelsForRole(selectedModels, $user?.role);
 
 				oldSelectedModelIds = structuredClone(selectedModels);
 

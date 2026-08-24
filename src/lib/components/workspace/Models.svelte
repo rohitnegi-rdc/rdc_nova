@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyImageFallback } from '$lib/utils/safeImageUrl';
 	import { base } from '$app/paths';
 	import { marked } from 'marked';
 
@@ -605,7 +606,7 @@
 												loading="lazy"
 												decoding="async"
 												on:error={(e) => {
-													e.target.src = '/favicon.png';
+													applyImageFallback(e);
 												}}
 											/>
 										</div>
