@@ -16,6 +16,7 @@
 		importModels
 	} from '$lib/apis/models';
 	import { copyToClipboard } from '$lib/utils';
+	import { appPath } from '$lib/utils/app-path';
 	import { page } from '$app/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 
@@ -42,7 +43,7 @@
 	import CheckCircle from '$lib/components/icons/CheckCircle.svelte';
 	import Minus from '$lib/components/icons/Minus.svelte';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import AdminViewSelector from './Models/AdminViewSelector.svelte';
@@ -285,7 +286,9 @@
 
 	const copyLinkHandler = async (model) => {
 		const baseUrl = window.location.origin;
-		const res = await copyToClipboard(`${baseUrl}/?model=${encodeURIComponent(model.id)}`);
+		const res = await copyToClipboard(
+			`${baseUrl}${appPath(`/?model=${encodeURIComponent(model.id)}`)}`
+		);
 
 		if (res) {
 			toast.success($i18n.t('Copied link to clipboard'));

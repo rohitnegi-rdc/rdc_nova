@@ -4,7 +4,8 @@
 
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
+	import { appPath } from '$lib/utils/app-path';
 
 	import { createNewChannel, deleteChannelById } from '$lib/apis/channels';
 	import { user } from '$lib/stores';
@@ -121,7 +122,7 @@
 			toast.success($i18n.t('Channel deleted successfully'));
 			onUpdate();
 
-			if ($page.url.pathname === `/channels/${channelId}`) {
+			if ($page.url.pathname === appPath(`/channels/${channelId}`)) {
 				goto('/');
 			}
 		}

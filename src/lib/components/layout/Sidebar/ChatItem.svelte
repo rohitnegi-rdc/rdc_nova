@@ -6,8 +6,9 @@
 </script>
 
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { toast } from 'svelte-sonner';
-	import { goto, invalidate, invalidateAll } from '$app/navigation';
+	import { goto, invalidate, invalidateAll } from '$lib/navigation';
 	import { onMount, getContext, createEventDispatcher, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
@@ -492,7 +493,7 @@
 				: selected
 					? 'bg-gray-100 dark:bg-gray-950 selected'
 					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
-			href="/c/{id}"
+			href="{base}/c/{id}"
 			on:click={() => {
 				dispatch('select');
 

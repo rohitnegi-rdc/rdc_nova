@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { toast } from 'svelte-sonner';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	import { WEBUI_NAME, config, user } from '$lib/stores';
 
@@ -311,7 +312,7 @@
 				{/if}
 				<a
 					class=" px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center"
-					href="/workspace/prompts/create"
+					href="{base}/workspace/prompts/create"
 				>
 					<Plus className="size-3" strokeWidth="2.5" />
 
@@ -393,7 +394,7 @@
 				{#each prompts as prompt (prompt.id)}
 					<a
 						class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl"
-						href={`/workspace/prompts/${prompt.id}`}
+						href={`${base}/workspace/prompts/${prompt.id}`}
 					>
 						<div class=" flex flex-col flex-1 space-x-4 cursor-pointer w-full pl-1">
 							<div class="flex items-center justify-between w-full mb-0.5">

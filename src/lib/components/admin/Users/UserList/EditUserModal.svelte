@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import { createEventDispatcher } from 'svelte';
 	import { onMount, getContext } from 'svelte';
 
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 
 	import { updateUserById, getUserGroupsById } from '$lib/apis/users';
 
@@ -122,7 +123,7 @@
 														class="px-1.5 py-0.5 rounded-xl bg-gray-100 dark:bg-gray-850 text-xs"
 													>
 														<a
-															href={'/admin/users/groups?id=' + userGroup.id}
+															href={base + '/admin/users/groups?id=' + userGroup.id}
 															on:click|preventDefault={() =>
 																goto('/admin/users/groups?id=' + userGroup.id)}
 														>

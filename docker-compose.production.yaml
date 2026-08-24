@@ -31,6 +31,7 @@ services:
         USE_SLIM: ${USE_SLIM:-true}
         UID: ${APP_UID:-1000}
         GID: ${APP_GID:-1000}
+        WEBUI_BASE_PATH: ${WEBUI_BASE_PATH:?Set WEBUI_BASE_PATH in .env.production}
     image: rdc-nova:${IMAGE_TAG:-manual}
     container_name: rdc-nova
     restart: unless-stopped
@@ -47,8 +48,9 @@ services:
       DATABASE_PORT: "5432"
       DATABASE_NAME: ${POSTGRES_DB}
       ENABLE_OLLAMA_API: "false"
+      ROOT_PATH: ${ROOT_PATH:?Set ROOT_PATH in .env.production}
     ports:
-      - "${OPEN_WEBUI_BIND_ADDRESS:-0.0.0.0}:${OPEN_WEBUI_PORT:-6010}:8080"
+      - "${OPEN_WEBUI_BIND_ADDRESS:-127.0.0.1}:${OPEN_WEBUI_PORT:-6010}:8080"
     volumes:
       - openwebui_data:/app/backend/data
     healthcheck:

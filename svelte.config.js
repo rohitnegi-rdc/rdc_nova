@@ -3,12 +3,21 @@ import * as child_process from 'node:child_process';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import fs from 'node:fs';
 
+const basePath = (process.env.WEBUI_BASE_PATH ?? '').trim();
+
+if (basePath && (!basePath.startsWith('/') || basePath.endsWith('/'))) {
+	throw new Error('WEBUI_BASE_PATH must start with / and must not end with /.');
+}
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	// Consult https://kit.svelte.dev/docs/integrations#preprocessors
 	// for more information about preprocessors
 	preprocess: vitePreprocess(),
 	kit: {
+		paths: {
+			base: basePath
+		},
 		// adapter-auto only supports some environments, see https://kit.svelte.dev/docs/adapter-auto for a list.
 		// If your environment is not supported or you settled on a specific environment, switch out the adapter.
 		// See https://kit.svelte.dev/docs/adapters for more information about adapters.

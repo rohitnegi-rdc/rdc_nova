@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { createEventDispatcher, getContext, onMount, tick } from 'svelte';
 
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import { fade, slide } from 'svelte/transition';
 
 	import { getUsage } from '$lib/apis';
@@ -18,6 +19,7 @@
 	} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { appPath } from '$lib/utils/app-path';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -255,7 +257,7 @@
 
 			{#if role === 'admin'}
 				<a
-					href="/admin"
+					href="{base}/admin"
 					draggable="false"
 					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 					on:click={async (e) => {
@@ -304,7 +306,7 @@
 			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
 				<div class="flex items-center w-full">
 					<a
-						href="/workspace"
+						href="{base}/workspace"
 						draggable="false"
 						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 						on:click={async (e) => {
@@ -361,7 +363,7 @@
 			{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
 				<div class="flex items-center w-full">
 					<a
-						href="/notes"
+						href="{base}/notes"
 						draggable="false"
 						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 						on:click={async (e) => {
@@ -405,7 +407,7 @@
 			{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
 				<div class="flex items-center w-full">
 					<a
-						href="/calendar"
+						href="{base}/calendar"
 						draggable="false"
 						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 						on:click={async (e) => {
@@ -458,7 +460,7 @@
 			{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
 				<div class="flex items-center w-full">
 					<a
-						href="/automations"
+						href="{base}/automations"
 						draggable="false"
 						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 						on:click={async (e) => {
@@ -515,7 +517,7 @@
 			{#if role === 'admin'}
 				<div class="flex items-center w-full">
 					<a
-						href="/playground"
+						href="{base}/playground"
 						draggable="false"
 						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 						on:click={async (e) => {
@@ -627,7 +629,7 @@
 					user.set(null);
 					localStorage.removeItem('token');
 
-					location.href = res?.redirect_url ?? '/auth';
+					location.href = res?.redirect_url ?? appPath('/auth');
 					show = false;
 				}}
 			>

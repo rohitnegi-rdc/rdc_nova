@@ -1,6 +1,7 @@
 <script>
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import { WEBUI_NAME, config } from '$lib/stores';
+	import { appPath } from '$lib/utils/app-path';
 	import { onMount, getContext } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -47,7 +48,7 @@
 						<button
 							class="relative z-20 flex px-5 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition font-medium text-sm text-black"
 							on:click={() => {
-								location.href = '/';
+								location.href = appPath('/');
 							}}
 						>
 							{$i18n.t('Check Again')}

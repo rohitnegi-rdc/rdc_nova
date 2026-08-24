@@ -91,7 +91,7 @@ fi
 required_variables=(
   POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD WEBUI_SECRET_KEY
   WEBUI_URL CORS_ALLOW_ORIGIN GEMINI_API_KEY RAG_GEMINI_API_KEY
-  KNOWLEDGE_BASE_ID LANGCHAIN_API_KEY
+  KNOWLEDGE_BASE_ID LANGCHAIN_API_KEY WEBUI_BASE_PATH ROOT_PATH
 )
 
 for variable_name in "${required_variables[@]}"; do
@@ -102,6 +102,28 @@ for variable_name in "${required_variables[@]}"; do
     fail "Required variable $variable_name is missing or empty in $ENV_FILE."
   fi
 done
+
+read_env_value() {
+  awk -F= -v key="$1" '
+    $1 == key {
+      value = substr($0, index($0, "=") + 1)
+      sub(/\r$/, "", value)
+      print value
+      exit
+    }
+  ' "$ENV_FILE"
+}
+
+WEBUI_BASE_PATH_VALUE="$(read_env_value WEBUI_BASE_PATH)"
+ROOT_PATH_VALUE="$(read_env_value ROOT_PATH)"
+WEBUI_URL_VALUE="$(read_env_value WEBUI_URL)"
+
+[[ "$WEBUI_BASE_PATH_VALUE" == /* && "$WEBUI_BASE_PATH_VALUE" != */ ]] \
+  || fail "WEBUI_BASE_PATH must start with / and must not end with /."
+[[ "$ROOT_PATH_VALUE" == "$WEBUI_BASE_PATH_VALUE" ]] \
+  || fail "ROOT_PATH must exactly match WEBUI_BASE_PATH."
+[[ "${WEBUI_URL_VALUE%/}" == *"$WEBUI_BASE_PATH_VALUE" ]] \
+  || fail "WEBUI_URL must end with WEBUI_BASE_PATH."
 
 OPEN_WEBUI_PORT_VALUE="$(awk -F= '
   $1 == "OPEN_WEBUI_PORT" { print substr($0, index($0, "=") + 1); exit }
@@ -128,6 +150,17 @@ health_check() {
     sleep "$delay_seconds"
   done
   return 1
+}
+
+frontend_base_path_check() {
+  local response
+  local app_url="${HEALTH_URL%/health}/"
+
+  response="$(curl --silent --show-error --fail --max-time 10 "$app_url")"
+  grep -Fq "base: \"${WEBUI_BASE_PATH_VALUE}\"" <<<"$response" \
+    || fail "The frontend image was not built for ${WEBUI_BASE_PATH_VALUE}."
+  grep -Fq "${WEBUI_BASE_PATH_VALUE}/_app/" <<<"$response" \
+    || fail "The frontend HTML does not reference base-prefixed Svelte assets."
 }
 
 cleanup_old_application_images() {
@@ -258,6 +291,9 @@ compose up -d --no-deps --force-recreate open-webui
 
 log "Waiting for $HEALTH_URL"
 health_check 36 5
+
+log "Verifying the frontend base path is ${WEBUI_BASE_PATH_VALUE}"
+frontend_base_path_check
 
 trap - ERR
 cleanup_old_application_images

@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import Sortable from 'sortablejs';
 
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
+	import { appPath } from '$lib/utils/app-path';
 	import {
 		user,
 		chats,
@@ -819,7 +821,7 @@
 					<Tooltip content={$i18n.t('New Chat')} placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-							href="/"
+							href="{base}/"
 							draggable="false"
 							on:click={async (e) => {
 								e.stopImmediatePropagation();
@@ -864,7 +866,7 @@
 							<Tooltip content={$i18n.t(meta.label)} placement="right">
 								<a
 									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-									href={meta.href}
+									href={appPath(meta.href)}
 									on:click={async (e) => {
 										e.stopImmediatePropagation();
 										e.preventDefault();
@@ -1008,7 +1010,7 @@
 			>
 				<a
 					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition no-drag-region"
-					href="/"
+					href="{base}/"
 					draggable="false"
 					on:click={newChatHandler}
 				>
@@ -1019,7 +1021,7 @@
 					/>
 				</a>
 
-				<a href="/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
+				<a href="{base}/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
 					<div
 						id="sidebar-webui-name"
 						class=" self-center font-medium text-gray-850 dark:text-white font-primary"
@@ -1068,7 +1070,7 @@
 						<a
 							id="sidebar-new-chat-button"
 							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
-							href="/"
+							href="{base}/"
 							draggable="false"
 							on:click={newChatHandler}
 							aria-label={$i18n.t('New Chat')}
@@ -1117,7 +1119,7 @@
 									<a
 										id="sidebar-{itemId}-button"
 										class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-										href={meta.href}
+										href={appPath(meta.href)}
 										on:click={itemClickHandler}
 										draggable="false"
 										aria-label={$i18n.t(meta.label)}
@@ -1218,7 +1220,7 @@
 							{#each $pinnedNotes as note (note.id)}
 								<a
 									class="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition group text-sm"
-									href={`/notes/${note.id}`}
+									href={`${base}/notes/${note.id}`}
 									on:click={() => {
 										itemClickHandler();
 									}}

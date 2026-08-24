@@ -1,7 +1,8 @@
 <script>
 	import { getContext, tick, onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
+	import { appPath } from '$lib/utils/app-path';
 	import { toast } from 'svelte-sonner';
 
 	import { config } from '$lib/stores';
@@ -323,7 +324,7 @@
 		{#each filteredSettings as tab (tab.id)}
 			<a
 				id={tab.id}
-				href={tab.route}
+				href={appPath(tab.route)}
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-right transition select-none {selectedTab ===
 				tab.id

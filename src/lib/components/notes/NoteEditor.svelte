@@ -10,7 +10,8 @@
 	import { toast } from 'svelte-sonner';
 	import equal from 'fast-deep-equal';
 
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
+	import { appPath } from '$lib/utils/app-path';
 
 	import dayjs from '$lib/dayjs';
 	import calendar from 'dayjs/plugin/calendar';
@@ -1067,7 +1068,9 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 									}}
 									onCopyLink={async () => {
 										const baseUrl = window.location.origin;
-										const res = await copyToClipboard(`${baseUrl}/notes/${note.id}`);
+										const res = await copyToClipboard(
+											`${baseUrl}${appPath(`/notes/${note.id}`)}`
+										);
 
 										if (res) {
 											toast.success($i18n.t('Copied link to clipboard'));

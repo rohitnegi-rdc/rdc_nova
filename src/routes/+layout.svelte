@@ -41,7 +41,7 @@
 		desktopEvent
 	} from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import { page } from '$app/stores';
 	import { beforeNavigate } from '$app/navigation';
 	import { updated } from '$app/state';
@@ -65,6 +65,7 @@
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
 	import { bestMatchingLanguage, displayFileHandler, getUserTimezone } from '$lib/utils';
+	import { appPath } from '$lib/utils/app-path';
 	import { setTextScale } from '$lib/utils/text-scale';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
@@ -117,12 +118,15 @@
 	const DISCONNECT_TOAST_DELAY_MS = 2000;
 
 	const setupSocket = async (enableWebsocket) => {
-		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
+		const socketOrigin = WEBUI_BASE_URL
+			? new URL(WEBUI_BASE_URL, window.location.origin).origin
+			: undefined;
+		const _socket = io(socketOrigin, {
 			reconnection: true,
 			reconnectionDelay: 1000,
 			reconnectionDelayMax: 5000,
 			randomizationFactor: 0.5,
-			path: '/ws/socket.io',
+			path: appPath('/ws/socket.io'),
 			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket'],
 			auth: { token: localStorage.token }
 		});
@@ -803,7 +807,7 @@
 			user.set(null);
 			localStorage.removeItem('token');
 
-			location.href = res?.redirect_url ?? '/auth';
+			location.href = res?.redirect_url ?? appPath('/auth');
 		}
 	};
 
@@ -1071,7 +1075,7 @@
 			if (error?.authRedirect) {
 				// Forward-auth proxy is redirecting to an external login page.
 				// Full-page navigation lets the browser follow the redirect natively.
-				window.location.href = '/';
+				window.location.href = appPath('/');
 				return;
 			}
 			console.error('Error loading backend config:', error);
@@ -1141,7 +1145,7 @@
 				} else {
 					// Don't redirect if we're already on the auth page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if ($page.url.pathname !== '/auth') {
+					if ($page.url.pathname !== appPath('/auth')) {
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				}
@@ -1217,7 +1221,7 @@
 		rel="search"
 		type="application/opensearchdescription+xml"
 		title={$WEBUI_NAME}
-		href="/opensearch.xml"
+		href={appPath('/opensearch.xml')}
 		crossorigin="use-credentials"
 	/>
 </svelte:head>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { getContext } from 'svelte';
 	import dayjs from 'dayjs';
 	import calendar from 'dayjs/plugin/calendar';
@@ -81,7 +82,7 @@
 					{/if}
 					<a
 						class={showUserInfo ? 'flex-1' : 'basis-3/5'}
-						href={shareUrl ? `/s/${chat.id}` : `/c/${chat.id}`}
+						href={shareUrl ? `${base}/s/${chat.id}` : `${base}/c/${chat.id}`}
 						on:click={() => onChatClick?.(chat.id)}
 					>
 						<div class="text-ellipsis line-clamp-1 w-full">

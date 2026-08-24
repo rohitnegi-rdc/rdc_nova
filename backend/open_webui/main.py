@@ -2855,7 +2855,7 @@ async def oauth_backchannel_logout(
 
 
 @app.get('/manifest.json')
-async def get_manifest_json():
+async def get_manifest_json(request: Request):
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
         session = await get_session()
         async with session.get(
@@ -2865,29 +2865,32 @@ async def get_manifest_json():
             r.raise_for_status()
             return await r.json()
     else:
+        base_path = request.scope.get('root_path', '').rstrip('/')
+        app_start_url = f'{base_path}/'
+        logo_url = f'{base_path}/static/logo.png'
         return {
             'name': app.state.WEBUI_NAME,
             'short_name': app.state.WEBUI_NAME,
             'description': f'{app.state.WEBUI_NAME} is an open, extensible, user-friendly interface for AI that adapts to your workflow.',
-            'start_url': '/',
+            'start_url': app_start_url,
             'display': 'standalone',
             'background_color': '#343541',
             'icons': [
                 {
-                    'src': '/static/logo.png',
+                    'src': logo_url,
                     'type': 'image/png',
                     'sizes': '500x500',
                     'purpose': 'any',
                 },
                 {
-                    'src': '/static/logo.png',
+                    'src': logo_url,
                     'type': 'image/png',
                     'sizes': '500x500',
                     'purpose': 'maskable',
                 },
             ],
             'share_target': {
-                'action': '/',
+                'action': app_start_url,
                 'method': 'GET',
                 'params': {'text': 'shared'},
             },

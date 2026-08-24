@@ -32,6 +32,12 @@ fi
 KEY_FILE="${WEBUI_SECRET_KEY_FILE:-.webui_secret_key}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
+ROOT_PATH="${ROOT_PATH:-}"
+
+if [[ -n "$ROOT_PATH" ]] && [[ "$ROOT_PATH" != /* || "$ROOT_PATH" == */ ]]; then
+  echo "ROOT_PATH must start with / and must not end with /." >&2
+  exit 1
+fi
 
 if [[ -z "${WEBUI_SECRET_KEY:-}" && -z "${WEBUI_JWT_SECRET_KEY:-}" ]]; then
   echo "No WEBUI_SECRET_KEY environment variable set, loading from file."
@@ -67,7 +73,7 @@ if [[ -n "${SPACE_ID:-}" ]]; then
   if [[ -n "${ADMIN_USER_EMAIL:-}" && -n "${ADMIN_USER_PASSWORD:-}" ]]; then
     echo "Creating admin user for Space..."
     WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-}" \
-      uvicorn open_webui.main:app --host "$HOST" --port "$PORT" --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-*}" &
+      uvicorn open_webui.main:app --host "$HOST" --port "$PORT" --root-path "$ROOT_PATH" --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-*}" &
     webui_pid=$!
 
     echo "Waiting for server to become healthy..."
@@ -104,5 +110,6 @@ exec env WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-}" \
   "$PYTHON_CMD" -m uvicorn open_webui.main:app \
     --host "$HOST" \
     --port "$PORT" \
+    --root-path "$ROOT_PATH" \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-*}" \
     "${ARGS[@]}"

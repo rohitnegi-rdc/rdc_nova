@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { onMount, onDestroy, getContext } from 'svelte';
 
 	import { toast } from 'svelte-sonner';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import { WEBUI_NAME, mobile, showSidebar, user, config } from '$lib/stores';
 
 	import {
@@ -416,7 +417,7 @@
 							{#each automations as automation (automation.id)}
 								<a
 									class="flex space-x-4 text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl"
-									href={`/automations/${automation.id}`}
+									href={`${base}/automations/${automation.id}`}
 								>
 									<div class="flex-1">
 										<div class="line-clamp-1 text-sm">{automation.name}</div>

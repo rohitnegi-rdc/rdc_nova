@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { toast } from 'svelte-sonner';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -7,7 +8,7 @@
 	const i18n = getContext('i18n');
 
 	import { WEBUI_NAME, user, skills as _skills } from '$lib/stores';
-	import { goto } from '$app/navigation';
+	import { goto } from '$lib/navigation';
 	import {
 		getSkills,
 		getSkillById,
@@ -299,7 +300,7 @@
 				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
 					<a
 						class=" px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center"
-						href="/workspace/skills/create"
+						href="{base}/workspace/skills/create"
 					>
 						<Plus className="size-3" strokeWidth="2.5" />
 
@@ -380,7 +381,7 @@
 							{#if skill.write_access}
 								<a
 									class=" flex flex-1 space-x-3.5 cursor-pointer w-full"
-									href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
+									href={`${base}/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 								>
 									<div class="flex items-center text-left">
 										<div class=" flex-1 self-center">

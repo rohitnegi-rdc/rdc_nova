@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { getContext, onMount } from 'svelte';
 	import { models, config, user } from '$lib/stores';
 
@@ -28,7 +29,7 @@
 		const _chat = chat;
 
 		const sharedChat = await shareChatById(localStorage.token, chatId);
-		shareUrl = `${window.location.origin}/s/${sharedChat.share_id}`;
+		shareUrl = `${window.location.origin}${base}/s/${sharedChat.share_id}`;
 		console.log(shareUrl);
 		chat = await getChatById(localStorage.token, chatId);
 
@@ -129,7 +130,7 @@
 			<div class="px-5 pt-4 pb-5 w-full flex flex-col">
 				<div class="text-sm dark:text-gray-300">
 					{#if chat.share_id}
-						<a href="/s/{chat.share_id}" target="_blank"
+						<a href="{base}/s/{chat.share_id}" target="_blank"
 							>{$i18n.t('You have shared this chat')}
 							<span class=" underline">{$i18n.t('before')}</span>.</a
 						>
