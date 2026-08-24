@@ -164,12 +164,15 @@ frontend_base_path_check() {
 }
 
 socketio_check() {
-  local response
-  local socket_url="${HEALTH_URL%/health}/ws/socket.io/?EIO=4&transport=polling"
+  compose exec -T open-webui python - <<'PY'
+from websockets.sync.client import connect
 
-  response="$(curl --silent --show-error --fail --max-time 10 "$socket_url")"
-  grep -Fq '"sid"' <<<"$response" \
-    || fail "The Socket.IO polling handshake did not return a session."
+url = 'ws://127.0.0.1:8080/ws/socket.io/?EIO=4&transport=websocket'
+with connect(url, open_timeout=10, close_timeout=1) as websocket:
+    payload = websocket.recv(timeout=10)
+    if not isinstance(payload, str) or not payload.startswith('0') or '"sid"' not in payload:
+        raise RuntimeError(f'Unexpected Socket.IO handshake: {payload!r}')
+PY
 }
 
 cleanup_old_application_images() {
@@ -261,11 +264,11 @@ log "Building rdc-nova:${IMAGE_TAG}; the existing application remains online dur
 compose build open-webui
 
 if [[ -n "$OLD_IMAGE_ID" ]]; then
-  log "Stopping Open WebUI for a consistent pre-deployment backup"
-  compose stop open-webui
-  APP_REPLACEMENT_STARTED=true
-
   if [[ "$SKIP_BACKUP" != true ]]; then
+    log "Stopping Open WebUI for a consistent pre-deployment backup"
+    compose stop open-webui
+    APP_REPLACEMENT_STARTED=true
+
     BACKUP_ID="rdc-nova-predeploy-$(date -u +%Y%m%d-%H%M%S)-${REVISION}"
     BACKUP_DIR="${BACKUP_ROOT:-$HOME/backups}/${BACKUP_ID}"
     mkdir -p "$BACKUP_DIR"
@@ -290,7 +293,7 @@ if [[ -n "$OLD_IMAGE_ID" ]]; then
     chmod 600 "$BACKUP_DIR/openwebui-postgres.dump" "$BACKUP_DIR/openwebui-data.tar.gz"
     log "Backup validation passed"
   else
-    log "Pre-deployment backup skipped by request"
+    log "Pre-deployment backup and backup-only stop skipped by request"
   fi
 fi
 
