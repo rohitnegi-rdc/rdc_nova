@@ -37,6 +37,7 @@ from open_webui.models.models import (
 )
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.app_path import prefix_root_path
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -517,6 +518,8 @@ async def get_model_profile_image(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    root_path = request.scope.get('root_path', '')
+    default_image_url = prefix_root_path('/static/favicon.png', root_path)
     profile_image_url = None
     updated_at = None
 
@@ -558,7 +561,7 @@ async def get_model_profile_image(
                 # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
                 if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
                     return RedirectResponse(
-                        url='/static/favicon.png',
+                        url=default_image_url,
                         status_code=status.HTTP_302_FOUND,
                     )
 
@@ -580,12 +583,12 @@ async def get_model_profile_image(
             safe_static = _safe_static_redirect_path(profile_image_url)
             if safe_static:
                 return RedirectResponse(
-                    url=safe_static,
+                    url=prefix_root_path(safe_static, root_path),
                     status_code=status.HTTP_302_FOUND,
                 )
 
     return RedirectResponse(
-        url='/static/favicon.png',
+        url=default_image_url,
         status_code=status.HTTP_302_FOUND,
     )
 

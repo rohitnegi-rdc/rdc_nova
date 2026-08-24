@@ -1,6 +1,28 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
 
-const PLACEHOLDER_IMAGE = '/favicon.png';
+const PLACEHOLDER_IMAGE = '/static/favicon.png';
+
+export function resolveSafeImageUrl(url: string, baseUrl: string): string {
+	const placeholder = `${baseUrl}${PLACEHOLDER_IMAGE}`;
+
+	if (!url) {
+		return placeholder;
+	}
+
+	if (
+		(baseUrl && (url === baseUrl || url.startsWith(`${baseUrl}/`))) ||
+		url.startsWith('https://www.gravatar.com/avatar/') ||
+		url.startsWith('data:image')
+	) {
+		return url;
+	}
+
+	if (url.startsWith('/')) {
+		return `${baseUrl}${url}`;
+	}
+
+	return placeholder;
+}
 
 /**
  * Validates an image URL against an allowlist of safe patterns and returns
@@ -16,18 +38,5 @@ const PLACEHOLDER_IMAGE = '/favicon.png';
  * prevent client-side IP/UA/Referer leaks to attacker-controlled servers.
  */
 export function safeImageUrl(url: string): string {
-	if (!url || url === '') {
-		return `${WEBUI_BASE_URL}${PLACEHOLDER_IMAGE}`;
-	}
-
-	if (
-		url.startsWith(WEBUI_BASE_URL) ||
-		url.startsWith('https://www.gravatar.com/avatar/') ||
-		url.startsWith('data:') ||
-		url.startsWith('/')
-	) {
-		return url;
-	}
-
-	return `${WEBUI_BASE_URL}${PLACEHOLDER_IMAGE}`;
+	return resolveSafeImageUrl(url, WEBUI_BASE_URL);
 }
