@@ -6,6 +6,7 @@
 
 	import { onMount, getContext, tick } from 'svelte';
 	import { goto } from '$lib/navigation';
+	import { base } from '$app/paths';
 	import { page } from '$app/stores';
 
 	import { getBackendConfig } from '$lib/apis';
@@ -141,6 +142,7 @@
 	};
 
 	let onboarding = false;
+	const rdcLoginLogoUrl = `${base}/logos/RDC%20Login%20Logo.png`;
 
 	async function setLogoImage() {
 		await tick();
@@ -274,6 +276,14 @@
 									submitHandler();
 								}}
 							>
+								<div class="mb-5 flex justify-center">
+									<img
+										src={rdcLoginLogoUrl}
+										class="w-44 sm:w-52 h-auto object-contain"
+										alt="RDC Concrete"
+									/>
+								</div>
+
 								<div class="mb-1">
 									<div class=" text-2xl font-medium">
 										{#if $config?.onboarding ?? false}
