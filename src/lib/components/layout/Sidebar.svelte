@@ -108,6 +108,9 @@
 
 	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
 	$: directChatEnabled = $config?.features?.enable_direct_chat ?? true;
+	$: if (!directChatEnabled && !showChannels) {
+		showChannels = true;
+	}
 	$: channelHomeHref = $channels?.[0]?.id ? `${base}/channels/${$channels[0].id}` : `${base}/`;
 
 	const isMenuItemVisible = (id) => {
