@@ -56,8 +56,8 @@ docker compose version >/dev/null 2>&1 \
 [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE does not exist."
 [[ -f "$COMPOSE_FILE" ]] || fail "$COMPOSE_FILE does not exist."
 
-exec 9>"${TMPDIR:-/tmp}/rdc-nova-production-deploy.lock"
-flock -n 9 || fail "Another RDC Nova deployment is already running."
+exec 9>"${TMPDIR:-/tmp}/rdc-tara-ops-production-deploy.lock"
+flock -n 9 || fail "Another RDC Tara Ops deployment is already running."
 
 if [[ "$ALLOW_DIRTY" != true ]] && [[ -n "$(git status --porcelain)" ]]; then
   git status --short
@@ -316,4 +316,4 @@ cleanup_old_application_images
 compose ps
 log "Deployment succeeded for revision $REVISION"
 log "The active image and one previous rdc-nova image were retained for rollback."
-log "If tools/main_pipe.py changed, update Nova V2 through Admin Panel > Functions; Functions are stored in PostgreSQL and are not copied into the image."
+log "If tools/main_pipe.py changed, update Tara Ops V2 through Admin Panel > Functions; Functions are stored in PostgreSQL and are not copied into the image."

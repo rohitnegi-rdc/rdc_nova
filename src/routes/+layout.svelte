@@ -74,7 +74,11 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getUserSettings } from '$lib/apis/users';
 	import dayjs from 'dayjs';
-	import { getAllUnreadChannelMentions, getChannels } from '$lib/apis/channels';
+	import {
+		getAllUnreadChannelMentions,
+		getChannels,
+		markChannelMentionRead
+	} from '$lib/apis/channels';
 
 	const unregisterServiceWorkers = async () => {
 		if ('serviceWorker' in navigator) {
@@ -662,19 +666,41 @@
 		}
 	};
 
+	const formatMentionNotificationContent = (content) => {
+		const cleaned = (content ?? '')
+			.replace(/<@U:[^|>]+\|([^>]+)>/g, '@$1')
+			.replace(/<@U:([^>]+)>/g, '@$1')
+			.replace(/<@M:[^|>]+\|([^>]+)>/g, '@$1')
+			.replace(/<@M:([^>]+)>/g, '@$1')
+			.replace(/<@G:[^|>]+\|([^>]+)>/g, '@$1')
+			.replace(/<@G:([^>]+)>/g, '@$1')
+			.replace(/<[^>]+>/g, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+		return cleaned || 'Open the mention';
+	};
+
 	const channelEventHandler = async (event) => {
 		console.log('channelEventHandler', event);
 		if (event?.data?.type === 'mention') {
 			const message = event.data.data;
-			unreadChannelMentions.update((current) => ({
-				...current,
-				[event.channel_id]: [
-					...new Set([...(current[event.channel_id] ?? []), event.mention_id ?? event.message_id])
-				]
-			}));
+			const mentionId = event.mention_id ?? event.message_id;
+			const isViewingChannel =
+				$page.url.pathname.includes(`/channels/${event.channel_id}`) &&
+				document.visibilityState === 'visible';
+
+			if (isViewingChannel && !message?.parent_id && mentionId) {
+				markChannelMentionRead(localStorage.token, event.channel_id, mentionId).catch(() => {});
+			} else if (mentionId) {
+				unreadChannelMentions.update((current) => ({
+					...current,
+					[event.channel_id]: [...new Set([...(current[event.channel_id] ?? []), mentionId])]
+				}));
+			}
 
 			const title = `${event?.user?.name ?? 'Someone'} mentioned you in #${event?.channel?.name ?? 'channel'}`;
-			const content = message?.content ?? '';
+			const content = formatMentionNotificationContent(message?.content);
 			if ($isLastActiveTab && ($settings?.notificationEnabled ?? false)) {
 				new Notification(`${title} • Open WebUI`, {
 					body: content,
@@ -690,6 +716,14 @@
 				duration: 15000,
 				unstyled: true
 			});
+			return;
+		}
+		if (event?.data?.type === 'mention:read') {
+			const readIds = event.message_ids ?? (event.message_id ? [event.message_id] : []);
+			unreadChannelMentions.update((current) => ({
+				...current,
+				[event.channel_id]: (current[event.channel_id] ?? []).filter((id) => !readIds.includes(id))
+			}));
 			return;
 		}
 		if (event.data?.type === 'typing') {
@@ -1022,9 +1056,11 @@
 			if (value) {
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('events:channel', channelEventHandler);
+				$socket?.off('events:mention', channelEventHandler);
 
 				$socket?.on('events', chatEventHandler);
 				$socket?.on('events:channel', channelEventHandler);
+				$socket?.on('events:mention', channelEventHandler);
 
 				const userSettings = await getUserSettings(localStorage.token);
 				if (userSettings) {
@@ -1064,6 +1100,7 @@
 			} else {
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('events:channel', channelEventHandler);
+				$socket?.off('events:mention', channelEventHandler);
 			}
 		});
 

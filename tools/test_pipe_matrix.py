@@ -1,4 +1,4 @@
-"""Live evaluation matrix for the grounded Nova pipe.
+"""Live evaluation matrix for the grounded Tara Ops pipe.
 
 Run from the backend environment with the same database/API configuration as the
 native WSL backend. The report intentionally prints metrics and classifications,

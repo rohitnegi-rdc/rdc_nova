@@ -2,7 +2,7 @@ import { browser, dev } from '$app/environment';
 import { base } from '$app/paths';
 // import { version } from '../../package.json';
 
-export const APP_NAME = 'RDC NOVA';
+export const APP_NAME = 'RDC Tara Ops';
 
 export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
 const WEBUI_ORIGIN = browser && dev ? `http://${WEBUI_HOSTNAME}` : '';

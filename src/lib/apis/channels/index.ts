@@ -72,6 +72,23 @@ export const markChannelMentionRead = async (
 	return await res.json();
 };
 
+export const markChannelMentionsRead = async (
+	token: string = '',
+	channel_id: string,
+	message_ids?: string[]
+) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/channels/${channel_id}/mentions/read`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ message_ids })
+	});
+	if (!res.ok) throw await res.json();
+	return await res.json();
+};
+
 export const getChannels = async (token: string = '') => {
 	let error = null;
 

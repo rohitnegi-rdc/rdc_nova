@@ -1,4 +1,4 @@
-"""Unit tests for Nova V2's reusable Google GenAI client."""
+"""Unit tests for Tara Ops V2's reusable Google GenAI client."""
 
 import asyncio
 import os
@@ -29,8 +29,16 @@ class _FakeModels:
             text = (
                 '{"decision":"greeting_only","confidence":0.99,'
                 '"domain_area":"none","matched_terms":[],"reason":"Pure greeting",'
-                '"greeting_response":"Hello! I’m Nova, your RDC Concrete support assistant. '
+                '"greeting_response":"Hello! I’m Tara Ops, your RDC Concrete support assistant. '
                 'How can I help you today?"}'
+            )
+        elif contents.rstrip().endswith(
+            "USER QUESTION:\nGive me a concrete example of a Python decorator."
+        ):
+            text = (
+                '{"decision":"out_of_domain","confidence":0.99,'
+                '"domain_area":"none","matched_terms":[],"reason":"Coding question",'
+                '"greeting_response":""}'
             )
         else:
             text = (
@@ -91,6 +99,21 @@ def _chunk():
 
 
 class GeminiClientReuseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generic_domain_word_does_not_override_out_of_domain_classifier(self):
+        factory = _ClientFactory()
+        pipe = main_pipe.Pipe()
+
+        with (
+            patch.dict(os.environ, {"GEMINI_API_KEY": "key-a"}),
+            patch.dict(sys.modules, _google_modules(factory)),
+        ):
+            domain = await pipe._domain_check(
+                "Give me a concrete example of a Python decorator."
+            )
+
+        self.assertEqual(domain["decision"], "out_of_domain")
+        self.assertNotIn("safety_override", domain)
+
     async def test_domain_check_preserves_llm_generated_greeting(self):
         factory = _ClientFactory()
         pipe = main_pipe.Pipe()
@@ -104,7 +127,7 @@ class GeminiClientReuseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(domain["decision"], "greeting_only")
         self.assertEqual(
             domain["greeting_response"],
-            "Hello! I’m Nova, your RDC Concrete support assistant. How can I help you today?",
+            "Hello! I’m Tara Ops, your RDC Concrete support assistant. How can I help you today?",
         )
 
     async def test_domain_and_validation_share_one_client(self):

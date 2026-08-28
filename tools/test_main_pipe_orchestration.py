@@ -1,4 +1,4 @@
-"""Structural contract for Nova V2's pipe orchestration."""
+"""Structural contract for Tara Ops V2's pipe orchestration."""
 
 import ast
 import inspect

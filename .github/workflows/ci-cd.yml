@@ -1,4 +1,4 @@
-name: RDC Nova CI/CD
+name: RDC Tara Ops CI/CD
 
 # Automatic triggers are paused until the first production deployment is
 # completed and verified manually.

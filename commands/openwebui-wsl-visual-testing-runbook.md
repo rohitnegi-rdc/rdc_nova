@@ -9,7 +9,7 @@ tags:
   - wsl
   - playwright
   - visual-testing
-  - nova-v2
+  - tara-ops-v2
 ---
 
 # Open WebUI WSL Development and Windows Visual QA Runbook
@@ -32,7 +32,7 @@ Use this order for routine resync and verification. It avoids rediscovering envi
 Known-good WSL flags:
 
 ```env
-WEBUI_NAME="RDC NOVA"
+WEBUI_NAME="RDC Tara Ops"
 ENABLE_COMMUNITY_SHARING=false
 ENABLE_VERSION_UPDATE_CHECK=false
 ENABLE_OLLAMA_API=false
@@ -173,7 +173,7 @@ test -x .venv/bin/python
 .venv/bin/python -m pip --version
 ```
 
-Nova V2 declares `google-genai` and `langsmith` in its function frontmatter. Open WebUI checks those requirements while loading functions. Verify both imports without printing secrets:
+Tara Ops V2 declares `google-genai` and `langsmith` in its function frontmatter. Open WebUI checks those requirements while loading functions. Verify both imports without printing secrets:
 
 ```bash
 cd ~/projects/open-webui/backend
@@ -186,7 +186,7 @@ If the venv reports `No module named pip`, repair that venv with `uv`:
 uv pip install --python ~/projects/open-webui/backend/.venv/bin/python pip
 ```
 
-If Nova V2 then fails to load because its declared packages are absent:
+If Tara Ops V2 then fails to load because its declared packages are absent:
 
 ```bash
 uv pip install --python ~/projects/open-webui/backend/.venv/bin/python google-genai langsmith
@@ -196,7 +196,7 @@ Install packages only in the WSL venv. Do not install backend dependencies into 
 
 During the verified recovery, the incomplete venv also required runtime packages including `Markdown`, PostgreSQL drivers, `python-mimeparse`, `pytz`, `ldap3`, `tiktoken`, `ddgs`, cloud-storage SDKs, `fpdf2`, and `validators`. Treat missing-import tracebacks as evidence and install the missing requirement into the same venv. Do not repeatedly reinstall the entire environment for each missing import.
 
-Important dependency note: the repository currently pins `google-genai==1.66.0`, while the unpinned Nova V2 frontmatter installed `google-genai==2.17.0` during the verified run. This is dependency drift. Before rebuilding a clean environment, align the function frontmatter and repository pin rather than assuming the newest package is always compatible.
+Important dependency note: the repository currently pins `google-genai==1.66.0`, while the unpinned Tara Ops V2 frontmatter installed `google-genai==2.17.0` during the verified run. This is dependency drift. Before rebuilding a clean environment, align the function frontmatter and repository pin rather than assuming the newest package is always compatible.
 
 Avoid using a full dependency reinstall as the first troubleshooting step. In this environment, a full `requirements.txt` installation attempted very large CUDA/PyTorch downloads and failed before completion. Reuse the existing venv, verify it, and repair only demonstrated gaps unless a clean rebuild is intentionally required.
 
@@ -374,15 +374,15 @@ Do not run `Get-ChildItem Env:QA_*`, because it prints the values. Then perform 
 1. Navigate to `QA_BASE_URL`.
 2. Wait briefly for hydration, then check for `#chat-input` first; a fresh context normally shows authentication, while a reused context may already be signed in.
 3. If the composer is absent, wait explicitly for `input[type="email"]` before filling it. Do not test its count immediately after `DOMContentLoaded` and then wait 90 seconds for the chat input.
-4. Assert the title is `RDC NOVA`.
-5. Assert the page contains `Sign in to RDC NOVA` when signed out.
+4. Assert the title is `RDC Tara Ops`.
+5. Assert the page contains `Sign in to RDC Tara Ops` when signed out.
 6. Fill `input[type="email"]` from `QA_EMAIL`.
 7. Fill `input[type="password"]` from `QA_PASSWORD`.
 8. Click `button[type="submit"]`.
 9. Wait until the URL no longer contains `/auth`.
 10. Confirm the success toast or authenticated navigation shell.
 11. Wait for model bootstrap to complete.
-12. Assert that model `Nova` is visible.
+12. Assert that model `Tara Ops` is visible.
 13. Assert the composer exists as `#chat-input[contenteditable="true"]` or by its textbox role.
 
 When checking backend configuration from the browser process, call `http://localhost:8080/api/config` directly. Do not fetch `/api/config` relative to the Vite origin and assume it is proxied; that produced a misleading 404 during verification.
@@ -412,7 +412,7 @@ Do not rely only on a screenshot of a spinner.
 4. Check model-provider connection attempts.
 5. Allow known provider timeouts to finish before declaring the page permanently stuck.
 
-In the verified run, the authenticated shell appeared immediately, but the main chat panel waited for `/api/models`. The browser showed no failed request because the request was still pending. Backend logs revealed two unavailable Ollama attempts of about 11 seconds each. After roughly 22–30 seconds, the Nova chat UI rendered correctly.
+In the verified run, the authenticated shell appeared immediately, but the main chat panel waited for `/api/models`. The browser showed no failed request because the request was still pending. Backend logs revealed two unavailable Ollama attempts of about 11 seconds each. After roughly 22–30 seconds, the Tara Ops chat UI rendered correctly.
 
 That delay is not expected after Ollama is disabled. A fresh authenticated `/api/models` request measured about 0.9 seconds with `ENABLE_OLLAMA_API=false` persisted.
 
@@ -456,7 +456,7 @@ The browser procedure is intentionally scenario-driven. After the stable logged-
 5. Inspect console and network evidence.
 6. Refresh and verify persistence if the change should persist.
 
-### Nova or Nova V2 query
+### Tara Ops or Tara Ops V2 query
 
 1. Select the intended model explicitly; do not assume the default.
 2. Locate `#chat-input`.
@@ -502,8 +502,8 @@ For citations, verify both presentation and evidence:
 | Frontend startup appears slow with Pyodide package messages | `npm run dev` performs `pyodide:fetch` before Vite | Wait for the explicit Vite-ready message; do not launch the browser early |
 | Backend cannot resolve `nova-postgres` | Docker-network hostname used from native WSL | Replace only `@nova-postgres:` with `@localhost:` after sourcing `docker.local.env` |
 | Backend imports fail one module at a time | Existing `.venv` is incomplete | Install the demonstrated missing package into `backend/.venv`; rerun import/startup |
-| Nova V2 loader says `No module named pip` | Function frontmatter invokes `python -m pip`, but pip is absent from venv | Install `pip` into that exact venv with `uv pip install --python ... pip` |
-| Nova V2 loader cannot import `google-genai` or `langsmith` | Declared pipe dependencies missing | Install them into the WSL backend venv and verify imports |
+| Tara Ops V2 loader says `No module named pip` | Function frontmatter invokes `python -m pip`, but pip is absent from venv | Install `pip` into that exact venv with `uv pip install --python ... pip` |
+| Tara Ops V2 loader cannot import `google-genai` or `langsmith` | Declared pipe dependencies missing | Install them into the WSL backend venv and verify imports |
 | Login succeeds but center panel spins | `/api/models` is pending during provider discovery | Inspect backend logs; distinguish pending provider timeouts from browser failures |
 | Ollama still runs after `ENABLE_OLLAMA_API=false` in the shell | Admin/database `ConfigVar` overrides env default | Disable Ollama in persisted Admin settings if it is unused |
 | A boolean env flag looks correct but the UI reports the opposite | A database-backed Admin value overrides the environment default | Query the authenticated config endpoint and update the saved Admin setting; use env as the clean-install default |
@@ -523,9 +523,9 @@ A local visual test passes only when all applicable items are true:
 - Backend process runs from `backend/.venv` in WSL.
 - PostgreSQL is reachable on `localhost:5432`.
 - Windows receives HTTP 200 from `/` and `/api/config`.
-- Browser renders `RDC NOVA`, not a blank HTML shell.
+- Browser renders `RDC Tara Ops`, not a blank HTML shell.
 - Authentication succeeds with the local QA account.
-- Model `Nova` and `#chat-input` appear after bootstrap.
+- Model `Tara Ops` and `#chat-input` appear after bootstrap.
 - Persisted Ollama config reports `ENABLE_OLLAMA_API=false` when Ollama is unused.
 - `/api/models` completes without an unavailable-Ollama timeout.
 - There are no unexplained console errors, failed requests, or HTTP errors.
@@ -534,7 +534,7 @@ A local visual test passes only when all applicable items are true:
 - Temporary screenshots or one-shot QA artifacts are removed unless intentionally retained as evidence.
 - No secret is present in Git status or a tracked file.
 
-The last verified visual result showed the complete Nova chat screen, model `Nova`, the composer, and suggestion prompts with zero console errors, zero failed requests, and zero HTTP error responses. After disabling persisted Ollama discovery, a fresh authenticated `/api/models` request completed in about 0.9 seconds.
+The last verified visual result showed the complete Tara Ops chat screen, model `Tara Ops`, the composer, and suggestion prompts with zero console errors, zero failed requests, and zero HTTP error responses. After disabling persisted Ollama discovery, a fresh authenticated `/api/models` request completed in about 0.9 seconds.
 
 ## 13. Stopping the development services
 

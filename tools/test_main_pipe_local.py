@@ -40,7 +40,7 @@ async def main() -> None:
     )
     users = await Users.get_users(limit=1)
     if not users["users"]:
-        raise RuntimeError("No Open WebUI user exists for the authenticated Nova dispatch test")
+        raise RuntimeError("No Open WebUI user exists for the authenticated Tara Ops dispatch test")
     user = users["users"][0]
     await get_all_models(request, user=user)
     body = {"messages": [{"role": "user", "content": QUESTION}], "stream": True}

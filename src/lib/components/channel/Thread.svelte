@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$lib/navigation';
 
-	import { socket, user } from '$lib/stores';
+	import { socket, unreadChannelMentions, user } from '$lib/stores';
 
-	import { getChannelThreadMessages, sendMessage } from '$lib/apis/channels';
+	import { getChannelThreadMessages, markChannelMentionsRead, sendMessage } from '$lib/apis/channels';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import MessageInput from './MessageInput.svelte';
@@ -29,6 +29,30 @@
 
 	let typingUsers = [];
 	let typingUsersTimeout = {};
+
+	const messageMentionsCurrentUser = (message) => {
+		if (!message?.content || !$user?.id) {
+			return false;
+		}
+		return (
+			message.content.includes(`<@U:${$user.id}`) ||
+			message.content.includes(`<@${$user.id}`) ||
+			message.content.includes(`data-id="${$user.id}"`)
+		);
+	};
+
+	const clearThreadMention = async () => {
+		if (!channel?.id || !threadId) {
+			return;
+		}
+
+		unreadChannelMentions.update((current) => ({
+			...current,
+			[channel.id]: (current[channel.id] ?? []).filter((unreadId) => unreadId !== threadId)
+		}));
+
+		await markChannelMentionsRead(localStorage.token, channel.id, [threadId]).catch(() => {});
+	};
 
 	$: if (threadId) {
 		initHandler();
@@ -56,6 +80,7 @@
 
 			await tick();
 			scrollToBottom();
+			await clearThreadMention();
 		} else {
 			goto('/');
 		}
@@ -71,6 +96,9 @@
 				if ((data?.parent_id ?? null) === threadId) {
 					if (messages) {
 						messages = [data, ...messages];
+						if (messageMentionsCurrentUser(data)) {
+							await clearThreadMention();
+						}
 
 						if (typingUsers.find((user) => user.id === event.user.id)) {
 							typingUsers = typingUsers.filter((user) => user.id !== event.user.id);

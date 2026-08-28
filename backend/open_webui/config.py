@@ -2882,6 +2882,12 @@ ENABLE_CHANNELS = ConfigVar(
     os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true',
 )
 
+ENABLE_DIRECT_CHAT = ConfigVar(
+    'ENABLE_DIRECT_CHAT',
+    'direct_chat.enable',
+    os.getenv('ENABLE_DIRECT_CHAT', 'True').lower() == 'true',
+)
+
 ENABLE_CALENDAR = ConfigVar(
     'ENABLE_CALENDAR',
     'calendar.enable',

@@ -1170,7 +1170,48 @@ async def mark_channel_mention_read(
     await check_channels_access(request, user)
     if not await Channels.is_user_channel_member(id, user.id, db=db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
-    return await Channels.clear_unread_mention(id, user.id, message_id, db=db)
+    cleared = await Channels.clear_unread_mention(id, user.id, message_id, db=db)
+    if cleared:
+        await emit_to_users(
+            'events:mention',
+            {
+                'channel_id': id,
+                'message_ids': [message_id],
+                'data': {'type': 'mention:read'},
+            },
+            [user.id],
+        )
+    return cleared
+
+
+class MarkChannelMentionsReadForm(BaseModel):
+    message_ids: Optional[list[str]] = None
+
+
+@router.post('/{id}/mentions/read', response_model=list[str])
+async def mark_channel_mentions_read(
+    request: Request,
+    id: str,
+    form_data: MarkChannelMentionsReadForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await check_channels_access(request, user)
+    if not await Channels.is_user_channel_member(id, user.id, db=db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
+
+    cleared_ids = await Channels.clear_unread_mentions(id, user.id, form_data.message_ids, db=db)
+    if cleared_ids:
+        await emit_to_users(
+            'events:mention',
+            {
+                'channel_id': id,
+                'message_ids': cleared_ids,
+                'data': {'type': 'mention:read'},
+            },
+            [user.id],
+        )
+    return cleared_ids
 
 
 @router.post('/{id}/messages/post', response_model=Optional[MessageModel])

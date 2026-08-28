@@ -19,7 +19,7 @@
 		getChannelById,
 		getChannelMessages,
 		getUnreadChannelMentions,
-		markChannelMentionRead,
+		markChannelMentionsRead,
 		sendMessage
 	} from '$lib/apis/channels';
 
@@ -51,6 +51,41 @@
 	let typingUsers = [];
 	let typingUsersTimeout = {};
 	let unreadMentionIds = [];
+
+	const messageMentionsCurrentUser = (message) => {
+		if (!message?.content || !$user?.id) {
+			return false;
+		}
+		return (
+			message.content.includes(`<@U:${$user.id}`) ||
+			message.content.includes(`<@${$user.id}`) ||
+			message.content.includes(`data-id="${$user.id}"`)
+		);
+	};
+
+	const clearUnreadMentions = async (mentionIds: string[]) => {
+		const idsToClear = [...new Set((mentionIds ?? []).filter(Boolean))];
+		if (!idsToClear.length) {
+			return;
+		}
+
+		unreadMentionIds = unreadMentionIds.filter((unreadId) => !idsToClear.includes(unreadId));
+		unreadChannelMentions.update((current) => ({
+			...current,
+			[id]: (current[id] ?? []).filter((unreadId) => !idsToClear.includes(unreadId))
+		}));
+
+		await markChannelMentionsRead(localStorage.token, id, idsToClear).catch(() => {});
+	};
+
+	const clearVisibleRootMentions = async () => {
+		const currentUnreadMentionIds = $unreadChannelMentions[id] ?? unreadMentionIds;
+		const visibleMentionIds = (messages ?? [])
+			.filter((message) => currentUnreadMentionIds.includes(message.id) && messageMentionsCurrentUser(message))
+			.map((message) => message.id);
+
+		await clearUnreadMentions(visibleMentionIds);
+	};
 
 	$: if (id) {
 		initHandler();
@@ -113,6 +148,7 @@
 
 			if (messages) {
 				scrollToBottom();
+				await clearVisibleRootMentions();
 
 				if (messages.length < 50) {
 					top = true;
@@ -359,11 +395,7 @@
 									onThread={(messageId) => {
 										threadId = messageId;
 										if (($unreadChannelMentions[id] ?? []).includes(messageId)) {
-											markChannelMentionRead(localStorage.token, id, messageId).catch(() => {});
-											unreadChannelMentions.update((current) => ({
-												...current,
-												[id]: (current[id] ?? []).filter((unreadId) => unreadId !== messageId)
-											}));
+											clearUnreadMentions([messageId]);
 										}
 									}}
 								onLoad={async () => {

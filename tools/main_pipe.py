@@ -1,5 +1,5 @@
 """
-title: Nova V2
+title: Tara Ops V2
 author: RDC Concrete
 version: 2.3.0
 description: Grounded Knowledge Base Pipe with hierarchical LangSmith tracing.
@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
-DOMAIN_GATE_PROMPT = """You are the domain gate for Nova, the internal support assistant for RDC Concrete.
+DOMAIN_GATE_PROMPT = """You are the domain gate for Tara Ops, the internal support assistant for RDC Concrete.
 
 Classify the user's latest question as exactly one of:
 - greeting_only: the complete message is only a social greeting with no question,
@@ -66,7 +66,7 @@ Decision rules:
   If the message also contains any question, request, problem, topic or instruction,
   it is not greeting_only; classify the substantive content normally.
 - For greeting_only, write a natural, professional response of at most two short
-  sentences in greeting_response. Introduce yourself as Nova, RDC Concrete's
+  sentences in greeting_response. Introduce yourself as Tara Ops, RDC Concrete's
   support assistant, and ask how you can help. Do not include factual claims,
   citations, support solutions or an evidence-source label.
 - For every other decision, greeting_response must be an empty string.
@@ -78,6 +78,9 @@ Decision rules:
 - A short question containing a potentially domain-related word such as batch,
   plant, silo, bin, ticket, service, mixer, Oracle or concrete but lacking context
   is ambiguous, not out_of_domain. Ambiguous questions continue to retrieval.
+- A domain word used in a clearly unrelated sense does not make a question
+  ambiguous or in_domain. For example, "a concrete Python example", "batch file
+  programming", "medical dosage" and "rating scale" are out_of_domain.
 - Questions about RDC Concrete as an organization or employer are in_domain even
   when they are not technical, for example questions about RDC departments,
   company policies, support contacts, plants, leadership, internal processes or
@@ -265,7 +268,7 @@ class _PipeRunState:
 
 @dataclass(frozen=True)
 class _EvidenceResult:
-    """Evidence selected for Nova after Knowledge Base and optional web checks."""
+    """Evidence selected for Tara Ops after Knowledge Base and optional web checks."""
 
     chunks: list[dict[str, Any]]
     origin: str
@@ -283,7 +286,7 @@ class _EvidenceContext:
 
 @dataclass(frozen=True)
 class _PreparedNova:
-    """Nova preset data resolved to the provider request sent downstream."""
+    """Tara Ops preset data resolved to the provider request sent downstream."""
 
     user: Any
     model: Any
@@ -294,7 +297,7 @@ class _PreparedNova:
 
 @dataclass(frozen=True)
 class _NovaAnswer:
-    """Clean Nova answer plus provider usage needed by the Pipe protocol."""
+    """Clean Tara Ops answer plus provider usage needed by the Pipe protocol."""
 
     text: str
     raw_usage: dict[str, Any]
@@ -368,7 +371,7 @@ class Pipe:
         )
         NOVA_MODEL: str = Field(
             default="nova",
-            description="Open WebUI model ID that owns Nova's configured system prompt.",
+            description="Open WebUI model ID that owns Tara Ops's configured system prompt.",
         )
         VALIDATION_MODEL: str = Field(
             default="gemini-3.5-flash-lite",
@@ -379,7 +382,7 @@ class Pipe:
             description="Open WebUI Knowledge Base ID queried by the pipe.",
         )
         TOP_K: int = Field(default=8, description="Number of Knowledge Base chunks to retrieve.")
-        MAX_CONTEXT_CHARS: int = Field(default=24000, description="Maximum evidence context sent to Nova.")
+        MAX_CONTEXT_CHARS: int = Field(default=24000, description="Maximum evidence context sent to Tara Ops.")
         MIN_SOURCES: int = Field(default=1, description="Minimum validated sources before web fallback.")
         TRACE_INCLUDE_CONTENT: bool = Field(
             default=True,
@@ -487,7 +490,7 @@ class Pipe:
             return
 
     def pipes(self) -> list[dict[str, str]]:
-        return [{"id": "nova_v2", "name": "Nova V2"}]
+        return [{"id": "nova_v2", "name": "Tara Ops V2"}]
 
     def _setting(self, name: str) -> Any:
         value = os.getenv(name, getattr(self.valves, name, ""))
@@ -579,7 +582,7 @@ class Pipe:
         *,
         model: str,
     ) -> dict[str, Any]:
-        """Forward provider-reported Nova usage; never count, estimate, or price locally."""
+        """Forward provider-reported Tara Ops usage; never count, estimate, or price locally."""
         normalized = usage or {}
         input_tokens = _as_int(normalized.get("input_tokens"))
         output_tokens = _as_int(normalized.get("output_tokens"))
@@ -599,7 +602,7 @@ class Pipe:
 
     @staticmethod
     def _domain_signals(query: str) -> list[str]:
-        """Find broad safety signals so a classifier cannot reject an RMC question."""
+        """Find broad vocabulary signals for diagnostics and routing qualification."""
         text = query.lower()
         patterns = (
             ("rdc", r"\brdc\b"),
@@ -625,9 +628,61 @@ class Pipe:
         )
         return [name for name, pattern in patterns if re.search(pattern, text)]
 
+    @classmethod
+    def _domain_override_signals(cls, query: str) -> list[str]:
+        """Return only signals strong enough to overturn an out-of-domain result.
+
+        A single overloaded word such as ``concrete``, ``batch``, ``dose`` or
+        ``scale`` is not sufficient. Strong RDC product/system identifiers are
+        sufficient by themselves; broader vocabulary must be corroborated
+        across material and operational/system categories.
+        """
+        text = query.lower()
+        signals = set(cls._domain_signals(query))
+        strong_patterns = (
+            ("rdc", r"\brdc\b"),
+            ("ready_mix", r"\bready[ -]?mix(?:ed)?\b"),
+            ("ids_edge", r"\bids[ -]?edge\b"),
+            ("integrated_batching", r"\bintegrated[ -]?batching\b"),
+            ("oracle_erp", r"\boracle(?:[ -]?(?:fusion|cloud))?(?:[ -]?erp)?\b"),
+            ("fg_code", r"\bfg[ -]?code\b"),
+            ("configbom", r"\bconfigbom\b"),
+        )
+        strong = {
+            name for name, pattern in strong_patterns if re.search(pattern, text)
+        }
+        if strong:
+            return sorted(signals | strong)
+
+        material_signals = {
+            "concrete",
+            "cement",
+            "admixture",
+            "aggregate",
+            "mix_design",
+            "raw_material",
+        }
+        operational_signals = {
+            "batching",
+            "sales_order",
+            "bin_silo",
+            "hmi_plc",
+            "event_viewer",
+            "dosage",
+            "weigher",
+        }
+        system_signals = {"ids", "oracle_erp"}
+        corroborated = bool(signals & material_signals) and bool(
+            signals & (operational_signals | system_signals)
+        )
+        if corroborated:
+            return sorted(signals)
+        return []
+
     async def _domain_check(self, query: str) -> dict[str, Any]:
         """Classify scope, failing open to retrieval whenever classification is uncertain."""
         signals = self._domain_signals(query)
+        override_signals = self._domain_override_signals(query)
         if not bool(self._setting("ENABLE_DOMAIN_CHECK")):
             return {
                 "decision": "in_domain",
@@ -678,13 +733,19 @@ class Pipe:
                 "prompt": DOMAIN_GATE_PROMPT,
                 **usage_report,
             }
-            # A model must never reject a query containing supported vocabulary.
-            # Route it through retrieval so the KB or a clarifying response can decide.
-            if label == "out_of_domain" and signals:
+            # Override only for strong or corroborated RDC/RMC signals. A single
+            # overloaded word must not defeat a high-confidence domain decision.
+            if label == "out_of_domain" and override_signals:
                 report["decision"] = "ambiguous"
-                report["safety_override"] = "domain_signal_present"
-                report["matched_terms"] = sorted(set(matched_terms + signals))
-                report["reason"] = "Classifier said out_of_domain, but supported-domain terms were detected; routed to retrieval."
+                report["safety_override"] = "qualified_domain_signal_present"
+                report["safety_override_signals"] = override_signals
+                report["matched_terms"] = sorted(
+                    set(matched_terms + override_signals)
+                )
+                report["reason"] = (
+                    "Classifier said out_of_domain, but strong or corroborated "
+                    "supported-domain signals were detected; routed to retrieval."
+                )
             return report
         except Exception as exc:
             return {
@@ -1354,19 +1415,19 @@ WEB EVIDENCE:\n{evidence}"""
         nova_model: Any,
         user: Any,
     ) -> dict[str, Any]:
-        """Build the sanitized request sent to Nova's underlying provider model.
+        """Build the sanitized request sent to Tara Ops's underlying provider model.
 
-        Nova is a workspace preset. Its system prompt and generation parameters
+        Tara Ops is a workspace preset. Its system prompt and generation parameters
         are retained, while model knowledge, tools, files, and web controls are
         deliberately excluded so this Pipe remains the only RAG owner.
         """
         if not nova_model:
-            raise RuntimeError(f"Nova model preset '{self._setting('NOVA_MODEL')}' was not found")
+            raise RuntimeError(f"Tara Ops model preset '{self._setting('NOVA_MODEL')}' was not found")
 
         preset_id = str(getattr(nova_model, "id", None) or self._setting("NOVA_MODEL"))
         base_model_id = str(getattr(nova_model, "base_model_id", None) or "").strip()
         if not base_model_id or base_model_id == preset_id:
-            raise RuntimeError(f"Nova model preset '{preset_id}' does not have a valid base model")
+            raise RuntimeError(f"Tara Ops model preset '{preset_id}' does not have a valid base model")
 
         from open_webui.utils.payload import apply_model_params_to_body_openai, apply_system_prompt_to_body
 
@@ -1437,7 +1498,7 @@ WEB EVIDENCE:\n{evidence}"""
         }
 
     async def _nova(self, request: Any, downstream: dict[str, Any], user: Any) -> tuple[list[Any], str, dict[str, Any]]:
-        """Call Nova's resolved provider model without reapplying preset behavior."""
+        """Call Tara Ops's resolved provider model without reapplying preset behavior."""
         from open_webui.utils.chat import generate_chat_completion
 
         response = await generate_chat_completion(
@@ -1467,7 +1528,7 @@ WEB EVIDENCE:\n{evidence}"""
         request: Any,
         task: Optional[str],
     ) -> Optional[str]:
-        """Send Open WebUI control tasks directly to Nova, outside the RAG flow."""
+        """Send Open WebUI control tasks directly to Tara Ops, outside the RAG flow."""
         if not task:
             return None
         if request is None:
@@ -1574,7 +1635,7 @@ WEB EVIDENCE:\n{evidence}"""
         ):
             answer = greeting_response
             skip_reason = (
-                "Greeting-only request; Knowledge Base, web search, and Nova "
+                "Greeting-only request; Knowledge Base, web search, and Tara Ops "
                 "generation bypassed."
             )
             state.final_output = {
@@ -1586,11 +1647,11 @@ WEB EVIDENCE:\n{evidence}"""
                 "domain_check": domain_check,
             }
             status_action = "greeting"
-            status_description = "Nova responded to the greeting"
+            status_description = "Tara Ops responded to the greeting"
         elif (
             decision == "out_of_domain"
             and confidence >= out_of_domain_threshold
-            and not self._domain_signals(query)
+            and not self._domain_override_signals(query)
         ):
             answer = self.OUT_OF_DOMAIN_MESSAGE
             skip_reason = (
@@ -1605,7 +1666,7 @@ WEB EVIDENCE:\n{evidence}"""
                 "domain_check": domain_check,
             }
             status_action = "out_of_domain"
-            status_description = "Request is outside Nova's supported domain"
+            status_description = "Request is outside Tara Ops's supported domain"
         else:
             return None
 
@@ -1905,7 +1966,7 @@ WEB EVIDENCE:\n{evidence}"""
         include_content: bool,
         event_emitter: Any,
     ) -> _EvidenceContext:
-        """Build bounded context and citations from the exact chunks sent to Nova."""
+        """Build bounded context and citations from the exact chunks sent to Tara Ops."""
         await self._emit_status(
             event_emitter,
             "build_context",
@@ -1965,7 +2026,7 @@ WEB EVIDENCE:\n{evidence}"""
         evidence_origin: str,
         user: Any,
     ) -> _PreparedNova:
-        """Resolve Nova's preset, system prompt, base model, and provider body."""
+        """Resolve Tara Ops's preset, system prompt, base model, and provider body."""
         from open_webui.models.models import Models
         from open_webui.models.users import UserModel
 
@@ -1999,7 +2060,7 @@ WEB EVIDENCE:\n{evidence}"""
         include_content: bool,
         event_emitter: Any,
     ) -> _NovaAnswer:
-        """Trace Nova request preparation and generate one clean assistant payload."""
+        """Trace Tara Ops request preparation and generate one clean assistant payload."""
         prepared = await trace.measure(
             "08-nova-input",
             {
@@ -2039,11 +2100,11 @@ WEB EVIDENCE:\n{evidence}"""
                 "configured_system_prompt": (
                     result.system_prompt or "<not found in model preset>"
                 ),
-                "system_prompt_applied_by": "Nova V2 Pipe",
+                "system_prompt_applied_by": "Tara Ops V2 Pipe",
                 "evidence_origin": evidence.origin,
                 "web_search_report": evidence.web_report,
                 "note": (
-                    "The effective provider request is sent directly to Nova's base "
+                    "The effective provider request is sent directly to Tara Ops's base "
                     "model. Model knowledge, files, tools, and web controls are excluded."
                 ),
             },
@@ -2071,7 +2132,7 @@ WEB EVIDENCE:\n{evidence}"""
         await self._emit_status(
             event_emitter,
             "nova_generate",
-            "Nova is generating the answer",
+            "Tara Ops is generating the answer",
             origin=evidence.origin,
             source_count=len(context.sources),
         )

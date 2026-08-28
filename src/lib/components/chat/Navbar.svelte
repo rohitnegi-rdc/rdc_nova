@@ -74,14 +74,16 @@
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
 
-<button
-	id="new-chat-button"
-	class="hidden"
-	on:click={() => {
-		initNewChat();
-	}}
-	aria-label="New Chat"
-/>
+{#if $config?.features?.enable_direct_chat ?? true}
+	<button
+		id="new-chat-button"
+		class="hidden"
+		on:click={() => {
+			initNewChat();
+		}}
+		aria-label="New Chat"
+	/>
+{/if}
 
 <nav
 	class="sticky top-0 z-30 w-full {chat?.id
@@ -182,7 +184,7 @@
 						{/if}
 					{/if}
 
-					{#if $mobile && !$temporaryChatEnabled && chat && chat.id}
+					{#if ($config?.features?.enable_direct_chat ?? true) && $mobile && !$temporaryChatEnabled && chat && chat.id}
 						<Tooltip content={$i18n.t('New Chat')}>
 							<button
 								class=" flex {$showSidebar

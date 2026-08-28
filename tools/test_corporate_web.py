@@ -1,4 +1,4 @@
-"""Live corporate web-search evaluation for the Nova V2 Pipe.
+"""Live corporate web-search evaluation for the Tara Ops V2 Pipe.
 
 Run from the backend environment with the same database/API configuration as
 the native OpenWebUI backend. The test forces the web-fallback branch so that

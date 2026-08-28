@@ -770,7 +770,7 @@ if LICENSE_PUBLIC_KEY:
 # WEBUI Identity
 ####################################
 
-WEBUI_NAME = os.getenv('WEBUI_NAME', 'RDC NOVA')
+WEBUI_NAME = os.getenv('WEBUI_NAME', 'RDC Tara Ops')
 
 WEBUI_FAVICON_URL = '/static/favicon.png'
 WEBUI_BUILD_HASH = os.getenv('WEBUI_BUILD_HASH', 'dev-build')

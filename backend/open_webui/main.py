@@ -171,6 +171,7 @@ from open_webui.config import (
     ENABLE_COMMUNITY_SHARING,
     # Direct Connections
     ENABLE_DIRECT_CONNECTIONS,
+    ENABLE_DIRECT_CHAT,
     ENABLE_EVALUATION_ARENA_MODELS,
     ENABLE_FOLDERS,
     ENABLE_FOLLOW_UP_GENERATION,
@@ -910,6 +911,7 @@ app.state.config.ENABLE_AUTOMATIONS = ENABLE_AUTOMATIONS
 app.state.config.AUTOMATION_MAX_COUNT = AUTOMATION_MAX_COUNT
 app.state.config.AUTOMATION_MIN_INTERVAL = AUTOMATION_MIN_INTERVAL
 app.state.config.ENABLE_CHANNELS = ENABLE_CHANNELS
+app.state.config.ENABLE_DIRECT_CHAT = ENABLE_DIRECT_CHAT
 app.state.config.ENABLE_CALENDAR = ENABLE_CALENDAR
 app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
@@ -2440,6 +2442,7 @@ async def get_app_config(request: Request):
                     'enable_folders': app.state.config.ENABLE_FOLDERS,
                     'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
                     'enable_channels': app.state.config.ENABLE_CHANNELS,
+                    'enable_direct_chat': app.state.config.ENABLE_DIRECT_CHAT,
                     'enable_calendar': app.state.config.ENABLE_CALENDAR,
                     'enable_automations': app.state.config.ENABLE_AUTOMATIONS,
                     'enable_notes': app.state.config.ENABLE_NOTES,

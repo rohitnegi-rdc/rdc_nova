@@ -1,4 +1,4 @@
-"""Focused contract tests for Nova V2's Open WebUI progress events."""
+"""Focused contract tests for Tara Ops V2's Open WebUI progress events."""
 
 import inspect
 import sys
@@ -40,7 +40,7 @@ class _TraceStub:
 
 class _ModelParams:
     def model_dump(self):
-        return {"system": "Test Nova prompt", "temperature": 0.25}
+        return {"system": "Test Tara Ops prompt", "temperature": 0.25}
 
 
 class _Models:
@@ -286,7 +286,7 @@ class PipeStatusEventTests(unittest.IsolatedAsyncioTestCase):
             effective = await self.pipe._effective_nova_request(body, nova_model, {"id": "user"})
 
         self.assertEqual(effective["model"], "gemini-test")
-        self.assertEqual(calls["system"], "Test Nova prompt")
+        self.assertEqual(calls["system"], "Test Tara Ops prompt")
         self.assertEqual(effective["temperature"], 0.25)
         self.assertIn("PIPE_EVIDENCE", effective["messages"][-1]["content"])
         for forbidden in (
@@ -403,9 +403,32 @@ class PipeStatusEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.events[-1]["data"]["done"])
         self.assertEqual(output, [self.pipe.OUT_OF_DOMAIN_MESSAGE])
 
+    async def test_high_confidence_out_of_domain_with_generic_domain_word_stops_before_retrieval(
+        self,
+    ):
+        output = await self._run(
+            domain={"decision": "out_of_domain", "confidence": 0.99},
+            retrieved=[_chunk()],
+            query="Give me a concrete example of a Python decorator.",
+        )
+
+        self.assertEqual(self.retrieve_calls, 0)
+        self.assertEqual(self._actions(), ["domain_check", "out_of_domain"])
+        self.assertEqual(output, [self.pipe.OUT_OF_DOMAIN_MESSAGE])
+
+    async def test_strong_domain_identifier_still_protects_against_false_rejection(self):
+        output = await self._run(
+            domain={"decision": "out_of_domain", "confidence": 0.99},
+            retrieved=[_chunk()],
+            query="How do I configure IDS Edge?",
+        )
+
+        self.assertEqual(self.retrieve_calls, 1)
+        self.assertIn("Grounded answer [1]", output)
+
     async def test_greeting_only_returns_llm_response_before_retrieval(self):
         greeting = (
-            "Hello! 👋 I’m Nova, your RDC Concrete support assistant. "
+            "Hello! 👋 I’m Tara Ops, your RDC Concrete support assistant. "
             "How can I help you today?"
         )
         output = await self._run(

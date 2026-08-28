@@ -247,7 +247,10 @@
 					console.log('Shortcut triggered: SEARCH');
 					event.preventDefault();
 					showSearch.set(!$showSearch);
-				} else if (isShortcutMatch(event, shortcuts[Shortcut.NEW_CHAT])) {
+				} else if (
+					($config?.features?.enable_direct_chat ?? true) &&
+					isShortcutMatch(event, shortcuts[Shortcut.NEW_CHAT])
+				) {
 					console.log('Shortcut triggered: NEW_CHAT');
 					event.preventDefault();
 					document.getElementById('sidebar-new-chat-button')?.click();
@@ -288,7 +291,10 @@
 					console.log('Shortcut triggered: OPEN_MODEL_SELECTOR');
 					event.preventDefault();
 					document.getElementById('model-selector-0-button')?.click();
-				} else if (isShortcutMatch(event, shortcuts[Shortcut.NEW_TEMPORARY_CHAT])) {
+				} else if (
+					($config?.features?.enable_direct_chat ?? true) &&
+					isShortcutMatch(event, shortcuts[Shortcut.NEW_TEMPORARY_CHAT])
+				) {
 					console.log('Shortcut triggered: NEW_TEMPORARY_CHAT');
 					event.preventDefault();
 					if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {

@@ -708,6 +708,42 @@ class ChannelTable:
             await db.commit()
             return True
 
+    async def clear_unread_mentions(
+        self, channel_id: str, user_id: str, message_ids: Optional[list[str]] = None, db: Optional[AsyncSession] = None
+    ) -> list[str]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChannelMember).filter(
+                    ChannelMember.channel_id == channel_id,
+                    ChannelMember.user_id == user_id,
+                )
+            )
+            member = result.scalars().first()
+            if not member:
+                return []
+
+            data = dict(member.data or {})
+            current_ids = list(data.get('unread_mention_message_ids') or [])
+            if not current_ids:
+                return []
+
+            if message_ids is None:
+                cleared_ids = current_ids
+                remaining_ids = []
+            else:
+                requested_ids = set(message_ids)
+                cleared_ids = [mid for mid in current_ids if mid in requested_ids]
+                remaining_ids = [mid for mid in current_ids if mid not in requested_ids]
+
+            if not cleared_ids:
+                return []
+
+            data['unread_mention_message_ids'] = remaining_ids
+            member.data = data
+            member.updated_at = int(time.time_ns())
+            await db.commit()
+            return cleared_ids
+
     async def update_member_active_status(
         self,
         channel_id: str,
