@@ -524,7 +524,8 @@
 			document.documentElement.style.setProperty('--sidebar-width', `${w}px`);
 		});
 
-		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
+		const savedSidebarState = localStorage.getItem('sidebar');
+		showSidebar.set(!$mobile ? (savedSidebarState === null ? true : savedSidebarState === 'true') : false);
 
 		const unsubscribers = [
 			mobile.subscribe((value) => {
