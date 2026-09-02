@@ -27,6 +27,11 @@
 		init();
 	}
 
+	const detectMobile = () => {
+		const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+		return /android|iphone|ipad|ipod|windows phone/i.test(userAgent);
+	};
+
 	const init = async () => {};
 </script>
 
@@ -62,7 +67,11 @@
 				class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 				type="button"
 				on:click={() => {
-					screenCaptureHandler();
+					if (detectMobile()) {
+						uploadFilesHandler();
+					} else {
+						screenCaptureHandler();
+					}
 					show = false;
 				}}
 			>
