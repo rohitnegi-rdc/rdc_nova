@@ -283,7 +283,7 @@ if [[ -n "$OLD_IMAGE_ID" ]]; then
       -v "${DATA_VOLUME}:/data:ro" \
       -v "${BACKUP_DIR}:/backup" \
       postgres:16-alpine \
-      -c 'tar -czf /backup/openwebui-data.tar.gz -C /data .'
+      -c "tar -czf /backup/openwebui-data.tar.gz -C /data . && chown $(id -u):$(id -g) /backup/openwebui-data.tar.gz"
 
     docker run --rm \
       -v "${BACKUP_DIR}:/backup:ro" \
