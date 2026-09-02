@@ -23,6 +23,16 @@ export default defineConfig({
 	build: {
 		sourcemap: true
 	},
+	server: {
+		proxy: {
+			'/api': { target: 'http://localhost:8080', changeOrigin: true },
+			'/oauth': { target: 'http://localhost:8080', changeOrigin: true },
+			'/ws': { target: 'http://localhost:8080', changeOrigin: true, ws: true },
+			'/socket.io': { target: 'http://localhost:8080', changeOrigin: true, ws: true },
+			'/static/favicon.png': { target: 'http://localhost:8080', changeOrigin: true },
+			'/static/splash.png': { target: 'http://localhost:8080', changeOrigin: true }
+		}
+	},
 	worker: {
 		format: 'es'
 	},

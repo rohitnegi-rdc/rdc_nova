@@ -4,8 +4,12 @@ import { base } from '$app/paths';
 
 export const APP_NAME = 'RDC Tara Ops';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
-const WEBUI_ORIGIN = browser && dev ? `http://${WEBUI_HOSTNAME}` : '';
+// Dev mode uses the same origin the page was loaded from (proxied to the
+// backend by Vite's dev-server proxy, see vite.config.ts) instead of
+// hardcoding a separate :8080 origin, so the app works when served through
+// any proxy/port (e.g. LAN/mobile access) without extra firewall exceptions.
+export const WEBUI_HOSTNAME = browser ? location.hostname : '';
+const WEBUI_ORIGIN = '';
 export const WEBUI_BASE_URL = `${WEBUI_ORIGIN}${base}`;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 
