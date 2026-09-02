@@ -779,13 +779,35 @@ class Pipe:
                 break
         return query or content
 
+    @staticmethod
+    def _split_message_content(content: Any) -> tuple[str, list[dict[str, Any]]]:
+        """Split Open WebUI multimodal message content into text and non-text parts.
+
+        Open WebUI attaches images as a list of content parts
+        (``[{"type": "text", ...}, {"type": "image_url", ...}]``) rather than a
+        plain string. Returns the concatenated text and the list of non-text
+        parts (images, etc.) so callers can rebuild the message without
+        dropping attachments.
+        """
+        if isinstance(content, str):
+            return content, []
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            other_parts: list[dict[str, Any]] = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(str(part.get("text", "")))
+                elif isinstance(part, dict):
+                    other_parts.append(part)
+            return "\n".join(text_parts), other_parts
+        return str(content or ""), []
+
     @classmethod
     def _query(cls, body: dict[str, Any]) -> str:
         for message in reversed(body.get("messages") or []):
             if message.get("role") == "user":
-                content = message.get("content", "")
-                content = content if isinstance(content, str) else str(content)
-                return cls._unwrap_user_query(content)
+                text, _ = cls._split_message_content(message.get("content", ""))
+                return cls._unwrap_user_query(text)
         return ""
 
     async def _retrieve(
@@ -1378,7 +1400,8 @@ WEB EVIDENCE:\n{evidence}"""
         last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
         if last_user is None:
             raise RuntimeError("No user message found")
-        original_query = self._unwrap_user_query(str(last_user.get("content", "")))
+        original_text, image_parts = self._split_message_content(last_user.get("content", ""))
+        original_query = self._unwrap_user_query(original_text)
         if self._is_corporate_query(original_query):
             downstream["messages"].insert(
                 0,
@@ -1398,7 +1421,7 @@ WEB EVIDENCE:\n{evidence}"""
             "knowledge_base": "Clearly state that the answer is based on the Knowledge Base and cite the supporting Knowledge Base source IDs.",
             "web_search": "Clearly state that the answer uses web search and cite the supporting web source IDs.",
         }.get(evidence_origin, "Do not claim an evidence origin that is not present in the context.")
-        last_user["content"] = (
+        enriched_text = (
             f"{original_query}\n\n"
             "Grounded evidence context:\n"
             f"{context}\n\n"
@@ -1407,6 +1430,10 @@ WEB EVIDENCE:\n{evidence}"""
             "Use the origin labels exactly as provided. Do not present WEB_SEARCH_EVIDENCE as Knowledge Base evidence. "
             f"If the context says NO_RELEVANT_EVIDENCE, answer using your configured system prompt but clearly state that no validated Knowledge Base or web evidence was found. {evidence_instruction}"
         )
+        if image_parts:
+            last_user["content"] = [{"type": "text", "text": enriched_text}, *image_parts]
+        else:
+            last_user["content"] = enriched_text
         return downstream
 
     async def _effective_nova_request(
