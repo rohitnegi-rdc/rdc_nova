@@ -20,7 +20,15 @@
 	const i18n = getContext('i18n');
 
 	let _src = '';
-	$: _src = safeImageUrl(src.startsWith('/') ? `${WEBUI_BASE_URL}${src}` : src);
+	// Some callers (chat/channel file previews) already prefix src with
+	// WEBUI_BASE_URL (e.g. via WEBUI_API_BASE_URL). Only add it here when it
+	// isn't already present, or a deployment under a base path (e.g. /opsmitra)
+	// ends up with it doubled and 404s.
+	$: _src = safeImageUrl(
+		src.startsWith('/') && !(WEBUI_BASE_URL && src.startsWith(WEBUI_BASE_URL))
+			? `${WEBUI_BASE_URL}${src}`
+			: src
+	);
 
 	let showImagePreview = false;
 </script>
