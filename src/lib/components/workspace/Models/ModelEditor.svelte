@@ -509,13 +509,13 @@
 										<img
 											src={info.meta.profile_image_url}
 											alt="model profile"
-											class="rounded-xl size-20 md:size-48 object-cover shrink-0"
+											class="size-20 md:size-48 object-contain shrink-0"
 										/>
 									{:else}
 										<img
 											src="{WEBUI_BASE_URL}/static/favicon.png"
 											alt="model profile"
-											class=" rounded-xl size-20 md:size-48 object-cover shrink-0"
+											class="size-20 md:size-48 object-contain shrink-0"
 										/>
 									{/if}
 

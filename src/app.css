@@ -1,5 +1,14 @@
 @reference "./tailwind.css";
 
+/* Model logos can be animated or landscape; never crop them like user photos. */
+img[src*="/models/model/profile/image"],
+img.assistant-message-profile-image,
+img.sidebar-new-chat-icon {
+	object-fit: contain;
+	border-radius: 0;
+	border-width: 0;
+}
+
 @font-face {
 	font-family: 'Inter';
 	src: url('/assets/fonts/Inter-Variable.ttf');

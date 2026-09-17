@@ -1250,7 +1250,12 @@
 
 <svelte:head>
 	<title>{$WEBUI_NAME}</title>
-	<link rel="icon" href="{WEBUI_BASE_URL}/static/favicon.png" />
+	<link
+		rel="icon"
+		type="image/png"
+		sizes="32x32"
+		href="{WEBUI_BASE_URL}/logos/favicon-32x32.png"
+	/>
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
 	<meta name="description" content={$WEBUI_NAME} />

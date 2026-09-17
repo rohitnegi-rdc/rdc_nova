@@ -143,6 +143,7 @@
 
 	let onboarding = false;
 	const rdcLoginLogoUrl = `${base}/logos/RDC%20Login%20Logo.png`;
+	const rdcDarkLoginLogoUrl = `${base}/logos/RDC-Login-Logo-dark.png`;
 
 	async function setLogoImage() {
 		await tick();
@@ -264,7 +265,7 @@
 									<img
 										id="logo"
 										src="{WEBUI_BASE_URL}/static/favicon.png"
-										class="size-24 rounded-full"
+										class="size-24 object-contain"
 										alt="{$WEBUI_NAME} logo"
 									/>
 								</div>
@@ -279,7 +280,12 @@
 								<div class="mb-5 flex justify-center">
 									<img
 										src={rdcLoginLogoUrl}
-										class="w-44 sm:w-52 h-auto object-contain"
+										class="w-44 sm:w-52 h-auto object-contain dark:hidden"
+										alt="RDC Concrete"
+									/>
+									<img
+										src={rdcDarkLoginLogoUrl}
+										class="hidden w-44 sm:w-52 h-auto object-contain dark:block"
 										alt="RDC Concrete"
 									/>
 								</div>
@@ -623,7 +629,7 @@
 						<img
 							id="logo"
 							src="{WEBUI_BASE_URL}/static/favicon.png"
-							class=" w-6 rounded-full"
+							class="w-12 h-10 object-contain"
 							alt=""
 						/>
 					</div>
