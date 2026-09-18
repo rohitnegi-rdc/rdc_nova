@@ -33,6 +33,8 @@
 	import Spinner from '../common/Spinner.svelte';
 
 	export let id = '';
+	export let deepLinkThreadId = null;
+	export let deepLinkMessageId = null;
 
 	let currentId = null;
 
@@ -153,6 +155,10 @@
 				if (messages.length < 50) {
 					top = true;
 				}
+			}
+
+			if (deepLinkThreadId) {
+				threadId = deepLinkThreadId;
 			}
 		} else {
 			goto('/');
@@ -387,6 +393,7 @@
 								{top}
 								{messages}
 								{replyToMessage}
+								highlightMessageId={deepLinkThreadId ? null : deepLinkMessageId}
 								onReply={async (message) => {
 									replyToMessage = message;
 									await tick();
@@ -457,6 +464,7 @@
 						<Thread
 							{threadId}
 							{channel}
+							highlightMessageId={deepLinkMessageId}
 							onClose={() => {
 								threadId = null;
 							}}

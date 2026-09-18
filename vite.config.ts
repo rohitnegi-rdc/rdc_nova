@@ -24,6 +24,7 @@ export default defineConfig({
 		sourcemap: true
 	},
 	server: {
+		allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io', '.ngrok.app'],
 		proxy: {
 			'/api': { target: 'http://localhost:8080', changeOrigin: true },
 			'/oauth': { target: 'http://localhost:8080', changeOrigin: true },

@@ -10,6 +10,7 @@
 
 	import AdvancedParams from './Advanced/AdvancedParams.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import { enablePushNotifications, disablePushNotifications } from '$lib/utils/push';
 	export let saveSettings: Function;
 	export let getModels: Function;
 
@@ -25,11 +26,20 @@
 	let showAdvanced = false;
 
 	const toggleNotification = async () => {
+		if (notificationEnabled) {
+			// Turning notifications off — also tear down the push subscription for this device.
+			notificationEnabled = false;
+			saveSettings({ notificationEnabled });
+			await disablePushNotifications(localStorage.token);
+			return;
+		}
+
 		const permission = await Notification.requestPermission();
 
 		if (permission === 'granted') {
-			notificationEnabled = !notificationEnabled;
-			saveSettings({ notificationEnabled: notificationEnabled });
+			notificationEnabled = true;
+			saveSettings({ notificationEnabled });
+			await enablePushNotifications(localStorage.token);
 		} else {
 			toast.error(
 				$i18n.t(
@@ -127,7 +137,7 @@
 			languages = languages.filter((l) => l.code !== 'dg-DG');
 		}
 
-		notificationEnabled = $settings.notificationEnabled ?? false;
+		notificationEnabled = $settings.notificationEnabled ?? true;
 		system = $settings.system ?? '';
 
 		params = { ...params, ...$settings.params };

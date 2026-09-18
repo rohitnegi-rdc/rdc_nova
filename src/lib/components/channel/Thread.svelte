@@ -16,6 +16,7 @@
 
 	export let threadId = null;
 	export let channel = null;
+	export let highlightMessageId = null;
 
 	export let onClose = () => {};
 
@@ -223,6 +224,7 @@
 					{top}
 					{messages}
 					{replyToMessage}
+					{highlightMessageId}
 					thread={true}
 					onReply={async (message) => {
 						replyToMessage = message;

@@ -67,12 +67,14 @@
 	import { bestMatchingLanguage, displayFileHandler, getUserTimezone } from '$lib/utils';
 	import { appPath } from '$lib/utils/app-path';
 	import { setTextScale } from '$lib/utils/text-scale';
+	import { enablePushNotifications, registerServiceWorker } from '$lib/utils/push';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import SyncStatsModal from '$lib/components/chat/Settings/SyncStatsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { getUserSettings } from '$lib/apis/users';
+	import { getUserSettings, updateUserSettings } from '$lib/apis/users';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import dayjs from 'dayjs';
 	import {
 		getAllUnreadChannelMentions,
@@ -101,6 +103,33 @@
 			location.href = to.url.href;
 		}
 	});
+
+	// Users don't reliably navigate to trigger the beforeNavigate check above, so also
+	// poll for new versions directly and force a hard reload as soon as one is found.
+	let showNotificationPermissionPrompt = false;
+	let notificationPromptShownThisSession = false;
+
+	const confirmNotificationPermission = async () => {
+		const permission = await Notification.requestPermission();
+		if (permission === 'granted') {
+			await settings.set({ ...$settings, notificationEnabled: true });
+			await updateUserSettings(localStorage.token, { ui: $settings });
+			await enablePushNotifications(localStorage.token).catch(() => {});
+		}
+	};
+
+	let updateCheckInterval = null;
+	const checkForUpdateAndReload = async () => {
+		try {
+			const hasUpdate = await updated.check();
+			if (hasUpdate) {
+				await unregisterServiceWorkers();
+				location.reload();
+			}
+		} catch (error) {
+			console.error('Error checking for app updates:', error);
+		}
+	};
 
 	setContext('i18n', i18n);
 
@@ -506,7 +535,7 @@
 			});
 
 			if ($isLastActiveTab) {
-				if ($settings?.notificationEnabled ?? false) {
+				if ($settings?.notificationEnabled ?? true) {
 					new Notification(`${data.title} • Open WebUI`, {
 						body: timeStr,
 						icon: `${WEBUI_BASE_URL}/static/favicon.png`
@@ -637,11 +666,15 @@
 					}
 
 					if ($isLastActiveTab) {
-						if ($settings?.notificationEnabled ?? false) {
-							new Notification(`${displayTitle} • Open WebUI`, {
+						if ($settings?.notificationEnabled ?? true) {
+							const notification = new Notification(`${displayTitle} • Open WebUI`, {
 								body: content,
 								icon: `${WEBUI_BASE_URL}/static/favicon.png`
 							});
+							notification.onclick = () => {
+								window.focus();
+								goto(`/c/${event.chat_id}`);
+							};
 						}
 					}
 
@@ -674,6 +707,8 @@
 			.replace(/<@M:([^>]+)>/g, '@$1')
 			.replace(/<@G:[^|>]+\|([^>]+)>/g, '@$1')
 			.replace(/<@G:([^>]+)>/g, '@$1')
+			.replace(/<@A:[^|>]+\|([^>]+)>/g, '@$1')
+			.replace(/<@A:([^>]+)>/g, '@$1')
 			.replace(/<[^>]+>/g, '')
 			.replace(/\s+/g, ' ')
 			.trim();
@@ -701,15 +736,20 @@
 
 			const title = `${event?.user?.name ?? 'Someone'} mentioned you in #${event?.channel?.name ?? 'channel'}`;
 			const content = formatMentionNotificationContent(message?.content);
-			if ($isLastActiveTab && ($settings?.notificationEnabled ?? false)) {
-				new Notification(`${title} • Open WebUI`, {
+			const mentionUrl = `/channels/${event.channel_id}?thread=${message?.parent_id ?? mentionId}&message=${event.message_id}`;
+			if ($isLastActiveTab && ($settings?.notificationEnabled ?? true)) {
+				const notification = new Notification(`${title} • Open WebUI`, {
 					body: content,
 					icon: `${WEBUI_API_BASE_URL}/users/${event?.user?.id}/profile/image`
 				});
+				notification.onclick = () => {
+					window.focus();
+					goto(mentionUrl);
+				};
 			}
 			toast.custom(NotificationToast, {
 				componentProps: {
-					onClick: () => goto(`/channels/${event.channel_id}`),
+					onClick: () => goto(mentionUrl),
 					content,
 					title
 				},
@@ -801,20 +841,25 @@
 
 			if (type === 'message') {
 				const title = `${data?.user?.name}${event?.channel?.type !== 'dm' ? ` (#${event?.channel?.name})` : ''}`;
+				const messageUrl = `/channels/${event.channel_id}?thread=${data?.parent_id ?? data?.id}&message=${data?.id}`;
 
 				if ($isLastActiveTab) {
-					if ($settings?.notificationEnabled ?? false) {
-						new Notification(`${title} • Open WebUI`, {
+					if ($settings?.notificationEnabled ?? true) {
+						const notification = new Notification(`${title} • Open WebUI`, {
 							body: data?.content,
 							icon: `${WEBUI_API_BASE_URL}/users/${data?.user?.id}/profile/image`
 						});
+						notification.onclick = () => {
+							window.focus();
+							goto(messageUrl);
+						};
 					}
 				}
 
 				toast.custom(NotificationToast, {
 					componentProps: {
 						onClick: () => {
-							goto(`/channels/${event.channel_id}`);
+							goto(messageUrl);
 						},
 						content: data?.content,
 						title: `${title}`
@@ -951,6 +996,16 @@
 	onMount(async () => {
 		window.addEventListener('message', windowMessageEventHandler);
 
+		if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+			registerServiceWorker().catch(() => {});
+
+			navigator.serviceWorker.addEventListener('message', (event) => {
+				if (event.data?.type === 'push-notification-click' && event.data?.url) {
+					goto(event.data.url);
+				}
+			});
+		}
+
 		let touchstartY = 0;
 
 		function isNavOrDescendant(el) {
@@ -984,6 +1039,13 @@
 		document.addEventListener('touchstart', touchstartHandler);
 		document.addEventListener('touchmove', touchmoveHandler, { passive: false });
 		document.addEventListener('touchend', touchendHandler);
+
+		updateCheckInterval = setInterval(checkForUpdateAndReload, 60000);
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'visible') {
+				checkForUpdateAndReload();
+			}
+		});
 
 		if (typeof window !== 'undefined') {
 			if (window.applyTheme) {
@@ -1062,6 +1124,25 @@
 				$socket?.on('events:channel', channelEventHandler);
 				$socket?.on('events:mention', channelEventHandler);
 
+				// Ask for notification permission immediately on login, using cached
+				// settings so this doesn't wait on a settings network round-trip.
+				if (
+					typeof Notification !== 'undefined' &&
+					Notification.permission === 'default' &&
+					!notificationPromptShownThisSession
+				) {
+					let cachedSettings = {};
+					try {
+						cachedSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+					} catch {
+						cachedSettings = {};
+					}
+					if (cachedSettings?.notificationEnabled ?? true) {
+						notificationPromptShownThisSession = true;
+						showNotificationPermissionPrompt = true;
+					}
+				}
+
 				const userSettings = await getUserSettings(localStorage.token);
 				if (userSettings) {
 					settings.set(userSettings.ui);
@@ -1073,6 +1154,16 @@
 					}
 				}
 
+				// Re-establish the push subscription silently if the user already
+				// granted permission in a previous session, so it survives across logins.
+				if (
+					typeof Notification !== 'undefined' &&
+					Notification.permission === 'granted' &&
+					($settings?.notificationEnabled ?? true)
+				) {
+					enablePushNotifications(localStorage.token).catch(() => {});
+				}
+
 				// Replay mentions created while this user was logged out.
 				const pendingMentions = await getAllUnreadChannelMentions(localStorage.token).catch(() => []);
 				for (const mention of pendingMentions) {
@@ -1082,9 +1173,10 @@
 					}));
 					toast.custom(NotificationToast, {
 						componentProps: {
-							onClick: () => goto(`/channels/${mention.channel_id}`),
+							onClick: () =>
+								goto(`/channels/${mention.channel_id}?thread=${mention.message_id}&message=${mention.message_id}`),
 							title: `You were mentioned in #${mention.channel_name}`,
-							content: mention.content
+							content: formatMentionNotificationContent(mention.content)
 						},
 						duration: 15000,
 						unstyled: true
@@ -1245,6 +1337,9 @@
 
 	onDestroy(() => {
 		bc.close();
+		if (updateCheckInterval) {
+			clearInterval(updateCheckInterval);
+		}
 	});
 </script>
 
@@ -1291,6 +1386,17 @@
 {#if $config?.features.enable_community_sharing}
 	<SyncStatsModal bind:show={showSyncStatsModal} eventData={syncStatsEventData} />
 {/if}
+
+<ConfirmDialog
+	bind:show={showNotificationPermissionPrompt}
+	title={$i18n.t('Allow Notifications?')}
+	message={$i18n.t(
+		'Allow notifications to get notified about new messages and mentions, even when the app is closed. You can always change this later from Settings.'
+	)}
+	cancelLabel={$i18n.t('Not now')}
+	confirmLabel={$i18n.t('Allow')}
+	onConfirm={confirmNotificationPermission}
+/>
 
 <Toaster
 	theme={$theme.includes('dark')

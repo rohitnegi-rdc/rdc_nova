@@ -21,12 +21,14 @@
 	export let modelSuggestions = false;
 	export let userSuggestions = false;
 	export let channelSuggestions = false;
+	export let allSuggestions = false;
 
 	let _models = [];
 	let _users = [];
 	let _channels = [];
+	let _all = [];
 
-	$: filteredItems = [..._users, ..._models, ..._channels].filter(
+	$: filteredItems = [..._all, ..._users, ..._models, ..._channels].filter(
 		(u) =>
 			u.label.toLowerCase().includes(query.toLowerCase()) ||
 			u.id.toLowerCase().includes(query.toLowerCase())
@@ -53,12 +55,20 @@
 		const item = filteredItems[index];
 		if (!item) return;
 
-		// Add the "U:", "M:" or "C:" prefix to the id
+		// Add the "U:", "M:", "C:" or "A:" prefix to the id
 		// and also append the label after a pipe |
 		// so that the mention renderer can show the label
 		if (item)
 			command({
-				id: `${item.type === 'user' ? 'U' : item.type === 'model' ? 'M' : 'C'}:${item.id}|${item.label}`,
+				id: `${
+					item.type === 'user-all'
+						? 'A'
+						: item.type === 'user'
+							? 'U'
+							: item.type === 'model'
+								? 'M'
+								: 'C'
+				}:${item.id}|${item.label}`,
 				label: item.label
 			});
 	};
@@ -118,6 +128,10 @@
 					.map((c) => ({ type: 'channel', id: c.id, label: c.name, data: c }))
 			];
 		} else {
+			if (allSuggestions) {
+				_all = [{ type: 'user-all', id: 'all', label: $i18n.t('All') }];
+			}
+
 			if (userSuggestions) {
 				getUserList();
 			}
@@ -165,7 +179,9 @@
 			{#each filteredItems as item, i}
 				{#if i === 0 || item?.type !== filteredItems[i - 1]?.type}
 					<div class="px-2 text-xs text-gray-500 py-1">
-						{#if item?.type === 'user'}
+						{#if item?.type === 'user-all'}
+							{$i18n.t('Everyone')}
+						{:else if item?.type === 'user'}
 							{$i18n.t('Users')}
 						{:else if item?.type === 'model'}
 							{$i18n.t('Models')}
@@ -188,7 +204,13 @@
 							: ''}"
 						data-selected={i === selectedIndex}
 					>
-						{#if item.type === 'channel'}
+						{#if item.type === 'user-all'}
+							<div
+								class="size-5 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center mr-2 text-[10px] font-medium"
+							>
+								@
+							</div>
+						{:else if item.type === 'channel'}
 							<div class=" size-4 justify-center flex items-center mr-0.5">
 								{#if isPublicChannel(item?.data)}
 									<Hashtag className="size-3" strokeWidth="2.5" />
@@ -221,7 +243,9 @@
 						</div>
 
 						<div class="shrink-0 text-xs text-gray-500">
-							{#if item.type === 'user'}
+							{#if item.type === 'user-all'}
+								{$i18n.t('Notify everyone')}
+							{:else if item.type === 'user'}
 								{$i18n.t('User')}
 							{:else if item.type === 'model'}
 								{$i18n.t('Model')}

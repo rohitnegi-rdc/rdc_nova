@@ -34,6 +34,7 @@
 	export let top = false;
 	export let thread = false;
 	export let unreadMentionIds = [];
+	export let highlightMessageId = null;
 
 	export let onLoad: Function = () => {};
 	export let onReply: Function = () => {};
@@ -53,6 +54,13 @@
 		await tick();
 		messagesLoading = false;
 	};
+
+	$: if (highlightMessageId && messages) {
+		tick().then(() => {
+			const el = document.getElementById(`msg-${highlightMessageId}`);
+			el?.scrollIntoView({ block: 'center' });
+		});
+	}
 </script>
 
 {#if messages}
@@ -125,6 +133,10 @@
 		{/if}
 
 		{#each messageList as message, messageIdx (id ? `${id}-${message.id}` : message.id)}
+			<div
+				id={`msg-${message.id}`}
+				class={highlightMessageId === message.id ? 'rounded-lg outline outline-2 outline-offset-2 outline-yellow-400/70 transition-all duration-1000' : ''}
+			>
 			<Message
 				{message}
 				unreadMention={unreadMentionIds.includes(message.id)}
@@ -251,6 +263,7 @@
 					}
 				}}
 			/>
+			</div>
 		{/each}
 
 		<div class="pb-6" />
