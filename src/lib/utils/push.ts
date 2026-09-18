@@ -18,15 +18,31 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
 export const isPushSupported = () =>
 	typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
 
+let reloadingForNewServiceWorker = false;
+
 export const registerServiceWorker = async (): Promise<ServiceWorkerRegistration | null> => {
 	if (!isPushSupported()) {
 		return null;
 	}
 
 	try {
-		return await navigator.serviceWorker.register(`${base}/sw.js`, {
+		const registration = await navigator.serviceWorker.register(`${base}/sw.js`, {
 			scope: `${base}/`
 		});
+
+		// Don't wait on the browser's own update-check timing — force it on every load
+		// so a new sw.js (e.g. changed notification icon) is picked up right away.
+		registration.update().catch(() => {});
+
+		if (!reloadingForNewServiceWorker) {
+			navigator.serviceWorker.addEventListener('controllerchange', () => {
+				if (reloadingForNewServiceWorker) return;
+				reloadingForNewServiceWorker = true;
+				location.reload();
+			});
+		}
+
+		return registration;
 	} catch (error) {
 		console.error('Service worker registration failed', error);
 		return null;

@@ -23,7 +23,7 @@ self.addEventListener('push', (event) => {
 	event.waitUntil(
 		self.registration.showNotification(title || 'Open WebUI', {
 			body: body || '',
-			icon: '/logos/favicon-32x32.png',
+			icon: '/logos/apple-touch-icon.png',
 			badge: '/logos/favicon-32x32.png',
 			tag: tag || undefined,
 			requireInteraction: true,
