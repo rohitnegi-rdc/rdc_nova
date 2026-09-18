@@ -839,35 +839,9 @@
 				}
 			}
 
-			if (type === 'message') {
-				const title = `${data?.user?.name}${event?.channel?.type !== 'dm' ? ` (#${event?.channel?.name})` : ''}`;
-				const messageUrl = `/channels/${event.channel_id}?thread=${data?.parent_id ?? data?.id}&message=${data?.id}`;
-
-				if ($isLastActiveTab) {
-					if ($settings?.notificationEnabled ?? true) {
-						const notification = new Notification(`${title} • Open WebUI`, {
-							body: data?.content,
-							icon: `${WEBUI_API_BASE_URL}/users/${data?.user?.id}/profile/image`
-						});
-						notification.onclick = () => {
-							window.focus();
-							goto(messageUrl);
-						};
-					}
-				}
-
-				toast.custom(NotificationToast, {
-					componentProps: {
-						onClick: () => {
-							goto(messageUrl);
-						},
-						content: data?.content,
-						title: `${title}`
-					},
-					duration: 15000,
-					unstyled: true
-				});
-			}
+			// No notification here for plain (untagged) messages — only an explicit
+			// @mention or @all should ever notify, and those are handled separately
+			// by the 'events:mention' branch above to avoid duplicate notifications.
 		}
 	};
 
