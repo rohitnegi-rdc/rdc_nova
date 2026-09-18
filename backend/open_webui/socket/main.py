@@ -11,6 +11,8 @@ import pycrdt as Y
 import socketio
 from open_webui.config import (
     CORS_ALLOW_ORIGIN,
+    ENABLE_PUSH_NOTIFICATIONS,
+    WEBUI_URL,
 )
 from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
@@ -42,6 +44,8 @@ from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import decode_token
+from open_webui.utils.channels import replace_mentions
+from open_webui.utils.push import send_push_to_users
 from open_webui.utils.redis import (
     build_sentinel_url,
     get_redis_connection,
@@ -837,6 +841,7 @@ async def _make_channel_emitter(request_info):
     """
     channel_id = request_info['chat_id'].removeprefix('channel:')
     message_id = request_info['message_id']
+    asker_id = request_info.get('user_id')
 
     state = {'last_emit_at': 0.0}
     THROTTLE_INTERVAL = 0.15  # ~6 updates/sec
@@ -845,6 +850,14 @@ async def _make_channel_emitter(request_info):
         content: str, done: bool = False, data: dict | None = None
     ):
         from open_webui.models.messages import MessageForm, Messages
+
+        # Tag the asker in the model's finished answer so they get notified,
+        # same as any other @mention (the response message is stored under
+        # the asker's own user_id, so the normal mention pipeline never sees it).
+        if done and content and asker_id:
+            asker = await Users.get_user_by_id(asker_id)
+            if asker:
+                content = f'<@U:{asker_id}|{asker.name}> {content}'
 
         update_form = MessageForm(content=content, data=data)
         if done:
@@ -872,6 +885,26 @@ async def _make_channel_emitter(request_info):
                 },
                 to=f'channel:{channel_id}',
             )
+
+            if done and content and asker_id and ENABLE_PUSH_NOTIFICATIONS:
+                try:
+                    channel = await Channels.get_channel_by_id(channel_id)
+                    if channel:
+                        anchor_id = message.parent_id or message.id
+                        await Channels.add_unread_mention(channel_id, asker_id, anchor_id)
+                        message_url = (
+                            f'{WEBUI_URL}/channels/{channel_id}?thread={anchor_id}&message={message.id}'
+                        )
+                        model_name = (message.meta or {}).get('model_name', 'Tara')
+                        await send_push_to_users(
+                            [asker_id],
+                            title=f'{model_name} answered you in #{channel.name}',
+                            body=replace_mentions(content),
+                            url=message_url,
+                            tag=f'channel:{channel_id}:mention:{message.id}',
+                        )
+                except Exception as e:
+                    log.exception(e)
 
     async def __channel_emitter__(event_data):
         event_type = event_data.get('type')

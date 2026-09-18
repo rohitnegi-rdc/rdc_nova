@@ -1093,7 +1093,7 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
             base_url = request.app.state.config.WEBUI_URL
             message_url = f'{base_url}/channels/{channel.id}?thread={message.parent_id or message.id}&message={message.id}'
 
-            if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS and channel.type in ['group', 'dm']:
+            if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS and channel.type == 'dm':
                 all_members = await Channels.get_members_by_channel_id(channel.id, db=db)
                 unmuted_recipient_ids = [
                     member.user_id
@@ -1103,11 +1103,13 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
                 if unmuted_recipient_ids:
                     await send_push_to_users(
                         unmuted_recipient_ids,
-                        title=f'{user.name}{f" (#{channel.name})" if channel.type != "dm" else ""}',
+                        title=user.name,
                         body=replace_mentions(message.content),
                         url=message_url,
                         tag=f'channel:{channel.id}:{message.id}',
                     )
+            # Non-DM channel messages only push via explicit @mention/@all,
+            # handled below, regardless of the sender's role.
 
             # Mentions are private notifications. Keep them separate from the
             # existing channel event so ordinary channel behavior is unchanged.
