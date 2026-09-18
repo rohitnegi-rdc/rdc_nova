@@ -1305,11 +1305,22 @@ class OAuthManager:
                     )
         else:
             if not user:
-                # If role management is disabled, use the default role for new users
-                role = auth_manager_config.DEFAULT_USER_ROLE
+                # RDC staff (@rdc.in) are trusted; skip the manual pending-approval
+                # gate that DEFAULT_USER_ROLE ("pending") would otherwise apply.
+                email = str(user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, '') or '').lower()
+                if email.endswith('@rdc.in'):
+                    role = 'user'
+                else:
+                    # If role management is disabled, use the default role for new users
+                    role = auth_manager_config.DEFAULT_USER_ROLE
             else:
-                # If role management is disabled, use the existing role for existing users
-                role = user.role
+                # If role management is disabled, use the existing role for existing users,
+                # except auto-promote an already-pending @rdc.in user out of manual approval.
+                email = str(user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, '') or '').lower()
+                if user.role == 'pending' and email.endswith('@rdc.in'):
+                    role = 'user'
+                else:
+                    role = user.role
 
         return role
 
