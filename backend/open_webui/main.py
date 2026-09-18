@@ -497,6 +497,7 @@ from open_webui.routers import (
     groups,
     images,
     knowledge,
+    knowledge_export,
     memories,
     models,
     notes,
@@ -1470,6 +1471,7 @@ app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(push.router, prefix='/api/v1/push', tags=['push'])
+app.include_router(knowledge_export.router, prefix='/api/v1/knowledge-export', tags=['knowledge-export'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 
