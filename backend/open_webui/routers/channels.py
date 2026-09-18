@@ -51,6 +51,7 @@ from open_webui.utils.models import (
     get_all_models,
     get_filtered_models,
 )
+from open_webui.utils.push import send_push_to_users
 from open_webui.utils.webhook import post_webhook
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1089,19 +1090,45 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
                 to=f'channel:{channel.id}',
             )
 
+            base_url = request.app.state.config.WEBUI_URL
+            message_url = f'{base_url}/channels/{channel.id}?thread={message.parent_id or message.id}&message={message.id}'
+
+            if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS and channel.type in ['group', 'dm']:
+                all_members = await Channels.get_members_by_channel_id(channel.id, db=db)
+                unmuted_recipient_ids = [
+                    member.user_id
+                    for member in all_members
+                    if member.user_id != user.id and not member.is_channel_muted
+                ]
+                if unmuted_recipient_ids:
+                    await send_push_to_users(
+                        unmuted_recipient_ids,
+                        title=f'{user.name}{f" (#{channel.name})" if channel.type != "dm" else ""}',
+                        body=replace_mentions(message.content),
+                        url=message_url,
+                        tag=f'channel:{channel.id}:{message.id}',
+                    )
+
             # Mentions are private notifications. Keep them separate from the
             # existing channel event so ordinary channel behavior is unchanged.
-            user_mentions = {
-                mention['id'] for mention in extract_mentions(message.content) if mention['id_type'] == 'U'
-            }
-            if user_mentions:
+            mentions = extract_mentions(message.content)
+            user_mentions = {mention['id'] for mention in mentions if mention['id_type'] == 'U'}
+            is_all_mention = any(mention['id_type'] == 'A' for mention in mentions)
+
+            if user_mentions or is_all_mention:
                 members = await Channels.get_members_by_channel_id(channel.id, db=db)
                 mention_anchor_id = message.parent_id or message.id
-                recipient_ids = [
-                    member.user_id
-                    for member in members
-                    if member.user_id in user_mentions and member.user_id != user.id
-                ]
+
+                if is_all_mention:
+                    # @all bypasses mute — everyone in the channel should see it.
+                    recipient_ids = [member.user_id for member in members if member.user_id != user.id]
+                else:
+                    recipient_ids = [
+                        member.user_id
+                        for member in members
+                        if member.user_id in user_mentions and member.user_id != user.id
+                    ]
+
                 for recipient_id in recipient_ids:
                     await Channels.add_unread_mention(channel.id, recipient_id, mention_anchor_id, db=db)
                 if recipient_ids:
@@ -1118,6 +1145,19 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
                         },
                         recipient_ids,
                     )
+                    if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS:
+                        mention_title = (
+                            f'{user.name} mentioned everyone in #{channel.name}'
+                            if is_all_mention
+                            else f'{user.name} mentioned you in #{channel.name}'
+                        )
+                        await send_push_to_users(
+                            recipient_ids,
+                            title=mention_title,
+                            body=replace_mentions(message.content),
+                            url=message_url,
+                            tag=f'channel:{channel.id}:mention:{message.id}',
+                        )
 
             if message.parent_id:
                 # If this message is a reply, emit to the parent message as well

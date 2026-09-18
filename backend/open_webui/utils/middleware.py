@@ -124,6 +124,7 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
+from open_webui.utils.push import send_push_to_users
 from open_webui.utils.webhook import post_webhook
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
@@ -3547,6 +3548,18 @@ async def non_streaming_chat_response_handler(response, ctx):
                                 },
                             )
 
+                    # Send a push notification if the user is not active
+                    if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS and not await Users.is_user_active(
+                        user.id
+                    ):
+                        await send_push_to_users(
+                            [user.id],
+                            title=f'{title} • Open WebUI',
+                            body=content,
+                            url=f'{request.app.state.config.WEBUI_URL}/c/{metadata["chat_id"]}',
+                            tag=f'chat:{metadata["chat_id"]}:{metadata.get("message_id")}',
+                        )
+
                     ctx['assistant_message'] = {
                         'content': content,
                         'output': response_output,
@@ -5160,6 +5173,16 @@ async def streaming_chat_response_handler(response, ctx):
                                 'url': f'{request.app.state.config.WEBUI_URL}/c/{metadata["chat_id"]}',
                             },
                         )
+
+                # Send a push notification if the user is not active
+                if request.app.state.config.ENABLE_PUSH_NOTIFICATIONS and not await Users.is_user_active(user.id):
+                    await send_push_to_users(
+                        [user.id],
+                        title=f'{title} • Open WebUI',
+                        body=content,
+                        url=f'{request.app.state.config.WEBUI_URL}/c/{metadata["chat_id"]}',
+                        tag=f'chat:{metadata["chat_id"]}:{metadata.get("message_id")}',
+                    )
 
                 await event_emitter(
                     {

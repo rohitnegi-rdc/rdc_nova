@@ -209,6 +209,7 @@ from open_webui.config import (
     ENABLE_TITLE_GENERATION,
     ENABLE_USER_STATUS,
     ENABLE_USER_WEBHOOKS,
+    ENABLE_PUSH_NOTIFICATIONS,
     ENABLE_VOICE_MODE_PROMPT,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
     # Retrieval (Web Search)
@@ -503,6 +504,7 @@ from open_webui.routers import (
     openai,
     pipelines,
     prompts,
+    push,
     retrieval,
     scim,
     skills,
@@ -675,6 +677,22 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
+
+    from open_webui.env import TARA_OPS_RERANK_WARM_MODEL
+
+    if TARA_OPS_RERANK_WARM_MODEL:
+
+        async def _warm_tara_ops_reranker():
+            try:
+                from open_webui.tara_ops_rag.reranker import warm_up
+
+                log.info(f'Pre-loading Tara Ops reranker model: {TARA_OPS_RERANK_WARM_MODEL}')
+                await warm_up(TARA_OPS_RERANK_WARM_MODEL)
+                log.info(f'Tara Ops reranker model ready: {TARA_OPS_RERANK_WARM_MODEL}')
+            except Exception as e:
+                log.warning(f'Failed to pre-load Tara Ops reranker model {TARA_OPS_RERANK_WARM_MODEL}: {e}')
+
+        asyncio.create_task(_warm_tara_ops_reranker())
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -917,6 +935,7 @@ app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
 app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
+app.state.config.ENABLE_PUSH_NOTIFICATIONS = ENABLE_PUSH_NOTIFICATIONS
 app.state.config.ENABLE_USER_STATUS = ENABLE_USER_STATUS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
@@ -1450,6 +1469,7 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
+app.include_router(push.router, prefix='/api/v1/push', tags=['push'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 

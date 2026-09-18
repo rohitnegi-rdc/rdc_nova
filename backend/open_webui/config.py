@@ -2981,6 +2981,12 @@ ENABLE_USER_WEBHOOKS = ConfigVar(
     os.getenv('ENABLE_USER_WEBHOOKS', 'False').lower() == 'true',
 )
 
+ENABLE_PUSH_NOTIFICATIONS = ConfigVar(
+    'ENABLE_PUSH_NOTIFICATIONS',
+    'ui.enable_push_notifications',
+    os.getenv('ENABLE_PUSH_NOTIFICATIONS', 'False').lower() == 'true',
+)
+
 # FastAPI / AnyIO settings
 THREAD_POOL_SIZE = os.getenv('THREAD_POOL_SIZE', None)
 

@@ -149,6 +149,11 @@ INSTANCE_ID = os.getenv('INSTANCE_ID', str(uuid4()))
 
 ENABLE_DB_MIGRATIONS = os.getenv('ENABLE_DB_MIGRATIONS', 'True').lower() == 'true'
 
+# Web Push (VAPID) — secrets, local-only for now, not admin-panel editable
+VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
+VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
+VAPID_SUBJECT = os.getenv('VAPID_SUBJECT', 'mailto:admin@example.com')
+
 
 # Function to parse each section
 def parse_section(section):
@@ -359,6 +364,10 @@ RESET_CONFIG_ON_START = os.getenv('RESET_CONFIG_ON_START', 'False').lower() == '
 ENABLE_REALTIME_CHAT_SAVE = os.getenv('ENABLE_REALTIME_CHAT_SAVE', 'False').lower() == 'true'
 ENABLE_QUERIES_CACHE = os.getenv('ENABLE_QUERIES_CACHE', 'False').lower() == 'true'
 RAG_SYSTEM_CONTEXT = os.getenv('RAG_SYSTEM_CONTEXT', 'False').lower() == 'true'
+# If set, pre-loads this cross-encoder model into tara_ops_rag.reranker's
+# in-memory cache at server startup (background task, non-blocking), so the
+# first real reranking request doesn't pay the model download/load cost.
+TARA_OPS_RERANK_WARM_MODEL = os.getenv('TARA_OPS_RERANK_WARM_MODEL', '')
 
 ####################################
 # REDIS
